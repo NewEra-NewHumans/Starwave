@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import {
   Ban,
+  BellRing,
   Check,
   ChevronDown,
   ChevronRight,
+  Clock,
   Compass,
   Flame,
   FolderPlus,
@@ -14,19 +16,30 @@ import {
   Search,
   Shield,
   Star,
+  UserCheck,
   UserMinus,
   UserPlus,
   Video,
+  X,
 } from 'lucide-react';
 import { Contact, FriendGroupName, SecuritySettings } from '../types/qq';
 import { AvatarView, QrCodeSvg } from './AvatarView';
 import { QqLevelIcons } from './ProfileCenterPanel';
 import { ME_PROFILE } from '../data/seedData';
 import { getContactLevelInfo } from '../utils/qqLevel';
+import { CloudFriendRequest } from '../utils/cloudChatService';
 
 interface ContactsPanelProps {
   contacts: Contact[];
   myAccountId?: string;
+  myDisplayName?: string;
+  currentUid?: string;
+  friendRequests?: CloudFriendRequest[];
+  onOpenAuthModal?: () => void;
+  onSendFriendRequest?: (contact: Contact, note: string) => Promise<void>;
+  onAcceptFriendRequest?: (req: CloudFriendRequest) => Promise<void>;
+  onRejectFriendRequest?: (requestId: string) => Promise<void>;
+  onCancelFriendRequest?: (requestId: string) => Promise<void>;
   onLookupAccountById?: (accountId: string) => Promise<Contact | null>;
   onUpdateContact: (id: string, patch: Partial<Contact>) => void;
   onDeleteContact: (id: string) => void;
@@ -46,6 +59,14 @@ const DEFAULT_GROUPS: FriendGroupName[] = ['特别关心', '我的好友', '同�
 export const ContactsPanel: React.FC<ContactsPanelProps> = ({
   contacts,
   myAccountId,
+  myDisplayName,
+  currentUid,
+  friendRequests = [],
+  onOpenAuthModal,
+  onSendFriendRequest,
+  onAcceptFriendRequest,
+  onRejectFriendRequest,
+  onCancelFriendRequest,
   onLookupAccountById,
   onUpdateContact,
   onDeleteContact,
@@ -59,7 +80,7 @@ export const ContactsPanel: React.FC<ContactsPanelProps> = ({
   onUpdateSecurity,
   minimalMode,
 }) => {
-  const [subTab, setSubTab] = useState<'friends' | 'add' | 'oneway' | 'blacklist' | 'stranger'>('friends');
+  const [subTab, setSubTab] = useState<'friends' | 'requests' | 'add' | 'oneway' | 'blacklist' | 'stranger'>('friends');
   const [searchQuery, setSearchQuery] = useState('');
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
   const [selectedId, setSelectedId] = useState<string>(contacts[0]?.id || '');
@@ -71,6 +92,8 @@ export const ContactsPanel: React.FC<ContactsPanelProps> = ({
   const [lookupResult, setLookupResult] = useState<Contact | null>(null);
   const [lookupLoading, setLookupLoading] = useState(false);
   const [lookupNotice, setLookupNotice] = useState('');
+  const [friendRequestNote, setFriendRequestNote] = useState('');
+  const [requestBusyId, setRequestBusyId] = useState<string | null>(null);
   const [radarDigits, setRadarDigits] = useState('4829');
   const [radarMatches, setRadarMatches] = useState<Contact[]>([]);
   const [scanSimulated, setScanSimulated] = useState(false);
@@ -78,6 +101,14 @@ export const ContactsPanel: React.FC<ContactsPanelProps> = ({
   const [newGroupName, setNewGroupName] = useState('');
 
   const selfAccountId = myAccountId || ME_PROFILE.qqNumber;
+
+  const incomingRequests = currentUid
+    ? friendRequests.filter((r) => r.toUid === currentUid)
+    : [];
+  const outgoingRequests = currentUid
+    ? friendRequests.filter((r) => r.fromUid === currentUid)
+    : [];
+  const pendingIncomingCount = incomingRequests.filter((r) => r.status === 'pending').length;
 
   const activeContacts = contacts.filter((c) => !c.blocked);
   const oneWayContacts = contacts.filter((c) => c.isOneWay && !c.blocked);
@@ -191,9 +222,14 @@ export const ContactsPanel: React.FC<ContactsPanelProps> = ({
             />
           </div>
 
-          <div className="grid grid-cols-4 gap-1 p-1 rounded-lg bg-slate-200/60 dark:bg-slate-800 text-[11px]">
+          <div className="grid grid-cols-5 gap-1 p-1 rounded-lg bg-slate-200/60 dark:bg-slate-800 text-[11px]">
             {[
-              { id: 'friends', label: '好友分组' },
+              { id: 'friends', label: '好友' },
+              {
+                id: 'requests',
+                label: pendingIncomingCount > 0 ? `申请(${pendingIncomingCount})` : '申请',
+                highlight: pendingIncomingCount > 0,
+              },
               { id: 'oneway', label: `单向(${oneWayContacts.length})` },
               { id: 'blacklist', label: `黑名单(${blockedContacts.length})` },
               { id: 'stranger', label: '权限' },
@@ -204,6 +240,8 @@ export const ContactsPanel: React.FC<ContactsPanelProps> = ({
                 className={`py-1 rounded-md font-medium truncate transition-colors ${
                   subTab === t.id
                     ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-sm'
+                    : t.highlight
+                    ? 'text-rose-600 dark:text-rose-400 font-semibold'
                     : 'text-slate-600 dark:text-slate-400'
                 }`}
               >
@@ -401,44 +439,122 @@ export const ContactsPanel: React.FC<ContactsPanelProps> = ({
                   {lookupNotice}
                 </div>
               )}
-              {lookupResult && (
-                <div className="flex items-center justify-between pt-3 border-t border-slate-100 dark:border-slate-800">
-                  <div className="flex items-center gap-3">
-                    <AvatarView name={lookupResult.name} src={lookupResult.avatar} size="md" />
-                    <div>
-                      <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                        {lookupResult.name}
+              {lookupResult && (() => {
+                const isCloudUser = lookupResult.id.startsWith('uid-');
+                const peerUid = isCloudUser ? lookupResult.id.replace(/^uid-/, '') : '';
+                const alreadyFriend = contacts.some(
+                  (c) => c.qqNumber === lookupResult.qqNumber && !c.blocked
+                );
+                const incomingPending = isCloudUser
+                  ? incomingRequests.find((r) => r.fromUid === peerUid && r.status === 'pending')
+                  : undefined;
+                const outgoingPending = isCloudUser
+                  ? outgoingRequests.find((r) => r.toUid === peerUid && r.status === 'pending')
+                  : undefined;
+
+                return (
+                  <div className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <AvatarView name={lookupResult.name} src={lookupResult.avatar} size="md" />
+                        <div className="min-w-0">
+                          <div className="text-sm font-semibold text-slate-900 dark:text-slate-100 truncate">
+                            {lookupResult.name}
+                          </div>
+                          <div className="text-xs text-slate-500 font-mono-tabular truncate">
+                            星涟号 {lookupResult.qqNumber} · {lookupResult.signature}
+                          </div>
+                        </div>
                       </div>
-                      <div className="text-xs text-slate-500 font-mono-tabular">
-                        星涟号 {lookupResult.qqNumber} · {lookupResult.signature}
-                      </div>
+                      {alreadyFriend ? (
+                        <button
+                          onClick={() => {
+                            const existing = contacts.find(
+                              (c) => c.qqNumber === lookupResult.qqNumber
+                            );
+                            if (existing) onStartChat(existing);
+                          }}
+                          className="px-3 py-1.5 text-xs font-medium rounded-lg bg-[#2563EB] text-white hover:bg-[#1D4ED8] shrink-0"
+                        >
+                          已是好友 · 发消息
+                        </button>
+                      ) : isCloudUser && !currentUid ? (
+                        <button
+                          onClick={() => onOpenAuthModal?.()}
+                          className="px-3 py-1.5 text-xs font-medium rounded-lg bg-[#2563EB] text-white hover:bg-[#1D4ED8] shrink-0"
+                        >
+                          登录后发送好友申请
+                        </button>
+                      ) : isCloudUser && incomingPending ? (
+                        <button
+                          disabled={requestBusyId === incomingPending.requestId}
+                          onClick={async () => {
+                            if (!onAcceptFriendRequest) return;
+                            setRequestBusyId(incomingPending.requestId);
+                            try {
+                              await onAcceptFriendRequest(incomingPending);
+                              setLookupResult(null);
+                              setQqLookupInput('');
+                              setSubTab('friends');
+                            } finally {
+                              setRequestBusyId(null);
+                            }
+                          }}
+                          className="px-3 py-1.5 text-xs font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-50 shrink-0"
+                        >
+                          对方已申请 · 立即同意
+                        </button>
+                      ) : isCloudUser && outgoingPending ? (
+                        <span className="px-3 py-1.5 text-xs font-medium rounded-lg bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 shrink-0">
+                          已发送申请 · 等待验证
+                        </span>
+                      ) : isCloudUser && onSendFriendRequest ? (
+                        <button
+                          disabled={requestBusyId === lookupResult.id}
+                          onClick={async () => {
+                            setRequestBusyId(lookupResult.id);
+                            try {
+                              const noteText =
+                                friendRequestNote.trim() ||
+                                `你好，我是 ${myDisplayName || '星涟好友'}，想加你为好友`;
+                              await onSendFriendRequest(lookupResult, noteText);
+                              setFriendRequestNote('');
+                              setLookupResult(null);
+                              setQqLookupInput('');
+                              setSubTab('requests');
+                            } finally {
+                              setRequestBusyId(null);
+                            }
+                          }}
+                          className="px-3 py-1.5 text-xs font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-50 shrink-0"
+                        >
+                          {requestBusyId === lookupResult.id ? '发送中...' : '发送好友申请'}
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => {
+                            onAddContact(lookupResult);
+                            setLookupResult(null);
+                            setQqLookupInput('');
+                            setSubTab('friends');
+                          }}
+                          className="px-3 py-1.5 text-xs font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-500 shrink-0"
+                        >
+                          加为好友
+                        </button>
+                      )}
                     </div>
+                    {isCloudUser && currentUid && !alreadyFriend && !incomingPending && !outgoingPending && (
+                      <input
+                        value={friendRequestNote}
+                        onChange={(e) => setFriendRequestNote(e.target.value.slice(0, 120))}
+                        placeholder={`填写验证消息（例如：你好，我是 ${myDisplayName || '你的朋友'}）`}
+                        className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-3 py-1.5 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-[#2563EB]"
+                      />
+                    )}
                   </div>
-                  {contacts.some((c) => c.qqNumber === lookupResult.qqNumber && !c.blocked) ? (
-                    <button
-                      onClick={() => {
-                        const existing = contacts.find((c) => c.qqNumber === lookupResult.qqNumber);
-                        if (existing) onStartChat(existing);
-                      }}
-                      className="px-3 py-1.5 text-xs font-medium rounded-lg bg-[#2563EB] text-white hover:bg-[#1D4ED8]"
-                    >
-                      已是好友 · 发消息
-                    </button>
-                  ) : (
-                    <button
-                      onClick={() => {
-                        onAddContact(lookupResult);
-                        setLookupResult(null);
-                        setQqLookupInput('');
-                        setSubTab('friends');
-                      }}
-                      className="px-3 py-1.5 text-xs font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-500"
-                    >
-                      加为好友
-                    </button>
-                  )}
-                </div>
-              )}
+                );
+              })()}
             </div>
 
             {/* 2. QR Code Add */}
@@ -519,6 +635,251 @@ export const ContactsPanel: React.FC<ContactsPanelProps> = ({
                 </div>
               ))}
             </div>
+          </div>
+        )}
+
+        {subTab === 'requests' && (
+          <div className="max-w-2xl mx-auto space-y-6">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                  <BellRing className="w-5 h-5 text-[#2563EB]" />
+                  云端好友申请与验证
+                </h3>
+                <p className="text-xs text-slate-500 mt-1">
+                  同意好友申请后，双方通讯录将自动互加，并建立加密云端私聊会话。
+                </p>
+              </div>
+              <button
+                onClick={() => setSubTab('add')}
+                className="px-3 py-1.5 text-xs font-medium rounded-lg bg-[#2563EB] text-white hover:bg-[#1D4ED8] whitespace-nowrap"
+              >
+                去搜星涟号
+              </button>
+            </div>
+
+            {!currentUid ? (
+              <div className="rounded-xl border border-slate-200 dark:border-slate-800 p-8 text-center space-y-3 bg-white/70 dark:bg-slate-900/50">
+                <UserCheck className="w-9 h-9 text-[#2563EB] mx-auto" />
+                <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                  登录后可收发实时云端好友申请
+                </div>
+                <p className="text-xs text-slate-500 max-w-md mx-auto">
+                  使用 Google 或 Microsoft 邮箱登录并完成验证后，其他用户即可通过您的 9 位星涟号向您发送好友申请。
+                </p>
+                <button
+                  onClick={() => onOpenAuthModal?.()}
+                  className="px-4 py-2 text-xs font-semibold rounded-lg bg-[#2563EB] text-white hover:bg-[#1D4ED8]"
+                >
+                  立即登录 / 激活云端账号
+                </button>
+              </div>
+            ) : (
+              <>
+                {/* Incoming Friend Requests */}
+                <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/60 overflow-hidden">
+                  <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+                    <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                      收到的好友申请 ({incomingRequests.length})
+                    </span>
+                    {pendingIncomingCount > 0 && (
+                      <span className="text-xs font-medium text-rose-600 dark:text-rose-400">
+                        {pendingIncomingCount} 条待处理
+                      </span>
+                    )}
+                  </div>
+                  {incomingRequests.length === 0 ? (
+                    <div className="p-6 text-center text-xs text-slate-500">
+                      暂无收到的好友申请
+                    </div>
+                  ) : (
+                    <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {incomingRequests.map((req) => {
+                        const busy = requestBusyId === req.requestId;
+                        return (
+                          <div
+                            key={req.requestId}
+                            className="p-4 flex items-center justify-between gap-4"
+                          >
+                            <div className="flex items-center gap-3 min-w-0">
+                              <AvatarView name={req.fromName} src={req.fromAvatar} size="md" />
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-sm font-semibold text-slate-900 dark:text-slate-100 truncate">
+                                    {req.fromName}
+                                  </span>
+                                  <span className="text-[11px] font-mono-tabular text-slate-400">
+                                    星涟号 {req.fromAccountId}
+                                  </span>
+                                </div>
+                                <div className="text-xs text-slate-600 dark:text-slate-300 truncate mt-0.5">
+                                  验证信息：{req.note || '请求添加你为好友'}
+                                </div>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              {req.status === 'pending' ? (
+                                <>
+                                  <button
+                                    disabled={busy}
+                                    onClick={async () => {
+                                      if (!onAcceptFriendRequest) return;
+                                      setRequestBusyId(req.requestId);
+                                      try {
+                                        await onAcceptFriendRequest(req);
+                                      } finally {
+                                        setRequestBusyId(null);
+                                      }
+                                    }}
+                                    className="px-3 py-1.5 text-xs font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-50"
+                                  >
+                                    {busy ? '处理中...' : '同意'}
+                                  </button>
+                                  <button
+                                    disabled={busy}
+                                    onClick={async () => {
+                                      if (!onRejectFriendRequest) return;
+                                      setRequestBusyId(req.requestId);
+                                      try {
+                                        await onRejectFriendRequest(req.requestId);
+                                      } finally {
+                                        setRequestBusyId(null);
+                                      }
+                                    }}
+                                    className="px-3 py-1.5 text-xs font-medium rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50"
+                                  >
+                                    拒绝
+                                  </button>
+                                </>
+                              ) : req.status === 'accepted' ? (
+                                <button
+                                  onClick={() => {
+                                    const friend = contacts.find((c) => c.id === `uid-${req.fromUid}`);
+                                    if (friend) onStartChat(friend);
+                                  }}
+                                  className="px-3 py-1.5 text-xs font-medium rounded-lg bg-[#2563EB]/10 text-[#2563EB] hover:bg-[#2563EB]/20"
+                                >
+                                  已同意 · 发消息
+                                </button>
+                              ) : (
+                                <span className="text-xs text-slate-400">已拒绝</span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* Outgoing Friend Requests */}
+                <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/60 overflow-hidden">
+                  <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-800 text-sm font-semibold text-slate-900 dark:text-slate-100">
+                    我发出的申请 ({outgoingRequests.length})
+                  </div>
+                  {outgoingRequests.length === 0 ? (
+                    <div className="p-6 text-center text-xs text-slate-500">
+                      暂无发出的好友申请
+                    </div>
+                  ) : (
+                    <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {outgoingRequests.map((req) => {
+                        const busy = requestBusyId === req.requestId;
+                        return (
+                          <div
+                            key={req.requestId}
+                            className="p-4 flex items-center justify-between gap-4"
+                          >
+                            <div className="flex items-center gap-3 min-w-0">
+                              <AvatarView name={req.toName} src={req.toAvatar} size="md" />
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-sm font-semibold text-slate-900 dark:text-slate-100 truncate">
+                                    {req.toName}
+                                  </span>
+                                  <span className="text-[11px] font-mono-tabular text-slate-400">
+                                    星涟号 {req.toAccountId}
+                                  </span>
+                                </div>
+                                <div className="text-xs text-slate-500 truncate mt-0.5">
+                                  验证留言：{req.note || '无'}
+                                </div>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              {req.status === 'pending' ? (
+                                <>
+                                  <span className="inline-flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400">
+                                    <Clock className="w-3.5 h-3.5" />
+                                    等待验证
+                                  </span>
+                                  <button
+                                    disabled={busy}
+                                    onClick={async () => {
+                                      if (!onCancelFriendRequest) return;
+                                      setRequestBusyId(req.requestId);
+                                      try {
+                                        await onCancelFriendRequest(req.requestId);
+                                      } finally {
+                                        setRequestBusyId(null);
+                                      }
+                                    }}
+                                    className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-rose-600"
+                                    title="撤回申请"
+                                  >
+                                    <X className="w-3.5 h-3.5" />
+                                  </button>
+                                </>
+                              ) : req.status === 'accepted' ? (
+                                <button
+                                  onClick={() => {
+                                    const friend = contacts.find((c) => c.id === `uid-${req.toUid}`);
+                                    if (friend) onStartChat(friend);
+                                  }}
+                                  className="px-3 py-1.5 text-xs font-medium rounded-lg bg-emerald-600/10 text-emerald-700 dark:text-emerald-400"
+                                >
+                                  已通过 · 发消息
+                                </button>
+                              ) : (
+                                <button
+                                  disabled={busy}
+                                  onClick={async () => {
+                                    if (!onSendFriendRequest) return;
+                                    setRequestBusyId(req.requestId);
+                                    try {
+                                      await onSendFriendRequest(
+                                        {
+                                          id: `uid-${req.toUid}`,
+                                          qqNumber: req.toAccountId,
+                                          name: req.toName,
+                                          avatar: req.toAvatar,
+                                          signature: '',
+                                          online: true,
+                                          platform: 'Web',
+                                          groupName: '我的好友',
+                                          starred: false,
+                                          sparkDays: 1,
+                                        },
+                                        req.note || '你好，请重新通过一下好友验证'
+                                      );
+                                    } finally {
+                                      setRequestBusyId(null);
+                                    }
+                                  }}
+                                  className="px-3 py-1.5 text-xs font-medium rounded-lg border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800"
+                                >
+                                  对方已拒绝 · 重发
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
           </div>
         )}
 

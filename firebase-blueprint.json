@@ -259,6 +259,330 @@
         "createdAt",
         "updatedAt"
       ]
+    },
+    "FriendRequest": {
+      "title": "FriendRequest",
+      "description": "Mutual friend verification request between two verified users keyed by fromUid_toUid.",
+      "type": "object",
+      "properties": {
+        "requestId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Deterministic ID fromUid_toUid."
+        },
+        "fromUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Sender Firebase Auth UID."
+        },
+        "fromAccountId": {
+          "type": "string",
+          "minLength": 9,
+          "maxLength": 9,
+          "pattern": "^[1-9][0-9]{8}$",
+          "description": "Sender 9-digit StarRipple Account ID."
+        },
+        "fromName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40,
+          "description": "Sender display name."
+        },
+        "fromAvatar": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Sender avatar key or URL."
+        },
+        "fromSignature": {
+          "type": "string",
+          "maxLength": 160,
+          "description": "Sender signature."
+        },
+        "fromLevel": {
+          "type": "integer",
+          "description": "Sender growth level."
+        },
+        "toUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Recipient Firebase Auth UID."
+        },
+        "toAccountId": {
+          "type": "string",
+          "minLength": 9,
+          "maxLength": 9,
+          "pattern": "^[1-9][0-9]{8}$",
+          "description": "Recipient 9-digit StarRipple Account ID."
+        },
+        "toName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40,
+          "description": "Recipient display name."
+        },
+        "toAvatar": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Recipient avatar key or URL."
+        },
+        "note": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "Verification greeting message."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "accepted", "rejected"],
+          "description": "Friend request workflow state."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server last-update timestamp."
+        }
+      },
+      "required": [
+        "requestId",
+        "fromUid",
+        "fromAccountId",
+        "fromName",
+        "fromAvatar",
+        "fromSignature",
+        "fromLevel",
+        "toUid",
+        "toAccountId",
+        "toName",
+        "toAvatar",
+        "note",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "CloudChat": {
+      "title": "CloudChat",
+      "description": "Shared direct or multi-user group chat metadata persisted in Firestore.",
+      "type": "object",
+      "properties": {
+        "chatId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Chat document ID (dm_uidA_uidB or grp_...)."
+        },
+        "kind": {
+          "type": "string",
+          "enum": ["single", "group"],
+          "description": "Direct message or multi-user group chat."
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60,
+          "description": "Group name or fallback direct chat label."
+        },
+        "avatar": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Group avatar key or URL."
+        },
+        "ownerUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Creator Firebase Auth UID."
+        },
+        "memberUids": {
+          "type": "array",
+          "description": "Bounded participant UID list (1 to 50 members)."
+        },
+        "lastMessagePreview": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Latest message summary text."
+        },
+        "lastMessageTime": {
+          "type": "string",
+          "maxLength": 20,
+          "description": "Latest message HH:mm label."
+        },
+        "lastMessageSenderUid": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "Sender UID of the latest message."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server last-update timestamp."
+        }
+      },
+      "required": [
+        "chatId",
+        "kind",
+        "title",
+        "avatar",
+        "ownerUid",
+        "memberUids",
+        "lastMessagePreview",
+        "lastMessageTime",
+        "lastMessageSenderUid",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "CloudChatMessage": {
+      "title": "CloudChatMessage",
+      "description": "Persisted message entry inside a shared CloudChat messages subcollection.",
+      "type": "object",
+      "properties": {
+        "messageId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Message document ID."
+        },
+        "chatId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Parent CloudChat ID."
+        },
+        "senderUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Sender Firebase Auth UID."
+        },
+        "senderAccountId": {
+          "type": "string",
+          "minLength": 9,
+          "maxLength": 9,
+          "pattern": "^[1-9][0-9]{8}$",
+          "description": "Sender 9-digit StarRipple Account ID."
+        },
+        "senderName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40,
+          "description": "Sender display nickname."
+        },
+        "senderAvatar": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Sender avatar key or URL."
+        },
+        "type": {
+          "type": "string",
+          "enum": ["text", "image", "file", "voice", "system", "red_packet"],
+          "description": "Message payload type."
+        },
+        "content": {
+          "type": "string",
+          "maxLength": 4000,
+          "description": "Message text or description."
+        },
+        "timestampLabel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 20,
+          "description": "Formatted HH:mm display time."
+        },
+        "recalled": {
+          "type": "boolean",
+          "description": "Whether the sender recalled this message."
+        },
+        "burnAfterSeconds": {
+          "type": "integer",
+          "description": "Ephemeral burn timer in seconds (0 if disabled)."
+        },
+        "replyToSender": {
+          "type": "string",
+          "maxLength": 40,
+          "description": "Quoted message sender name."
+        },
+        "replyToPreview": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "Quoted message preview."
+        },
+        "fileName": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Attachment filename if file message."
+        },
+        "fileSizeBytes": {
+          "type": "integer",
+          "description": "Attachment file size in bytes."
+        },
+        "fileType": {
+          "type": "string",
+          "maxLength": 40,
+          "description": "Attachment category tag."
+        },
+        "imageUrl": {
+          "type": "string",
+          "maxLength": 250000,
+          "description": "Compressed image data URL or HTTPS image URL."
+        },
+        "memberUids": {
+          "type": "array",
+          "description": "Parent chat memberUids snapshot for query-enforced list rules."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server last-update timestamp."
+        }
+      },
+      "required": [
+        "messageId",
+        "chatId",
+        "senderUid",
+        "senderAccountId",
+        "senderName",
+        "senderAvatar",
+        "type",
+        "content",
+        "timestampLabel",
+        "recalled",
+        "burnAfterSeconds",
+        "replyToSender",
+        "replyToPreview",
+        "fileName",
+        "fileSizeBytes",
+        "fileType",
+        "imageUrl",
+        "memberUids",
+        "createdAt",
+        "updatedAt"
+      ]
     }
   },
   "firestore": {
@@ -278,7 +602,25 @@
       "schema": {
         "$ref": "#/entities/Friend"
       },
-      "description": "Owner-private subcollection storing friends added via exclusive accountId."
+      "description": "Owner-private subcollection storing friends added via exclusive accountId or accepted friend request."
+    },
+    "/friend_requests/{requestId}": {
+      "schema": {
+        "$ref": "#/entities/FriendRequest"
+      },
+      "description": "Mutual friend verification requests keyed deterministically by fromUid_toUid."
+    },
+    "/chats/{chatId}": {
+      "schema": {
+        "$ref": "#/entities/CloudChat"
+      },
+      "description": "Shared direct and multi-user group chats accessible strictly to members in memberUids."
+    },
+    "/chats/{chatId}/messages/{messageId}": {
+      "schema": {
+        "$ref": "#/entities/CloudChatMessage"
+      },
+      "description": "Persisted messages inside a shared cloud chat."
     }
   }
 }

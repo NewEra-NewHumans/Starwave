@@ -18,6 +18,8 @@ interface CreateGroupModalProps {
   onClose: () => void;
   contacts: Contact[];
   conversations: Conversation[];
+  currentUserName?: string;
+  currentUserAvatar?: string;
   onCreateGroup: (title: string, maxMembers: number, members: GroupMember[]) => void;
 }
 
@@ -26,6 +28,8 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
   onClose,
   contacts,
   conversations,
+  currentUserName,
+  currentUserAvatar,
   onCreateGroup,
 }) => {
   const [tab, setTab] = useState<'friends' | 'groups' | 'bots'>('friends');
@@ -56,8 +60,8 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
     const pickedMembers: GroupMember[] = [
       {
         id: 'me',
-        name: '苏明远',
-        avatar: GENERATED_ASSETS.me,
+        name: currentUserName || '苏明远',
+        avatar: currentUserAvatar || GENERATED_ASSETS.me,
         role: 'owner',
         title: '群主',
         online: true,
@@ -166,8 +170,13 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
                     <div className="flex items-center gap-3">
                       <AvatarView name={c.name} src={c.avatar} size="sm" online={c.online} />
                       <div>
-                        <div className="text-sm font-medium text-slate-900 dark:text-slate-100">
-                          {c.remark || c.name}
+                        <div className="text-sm font-medium text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
+                          <span>{c.remark || c.name}</span>
+                          {c.id.startsWith('uid-') && (
+                            <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
+                              云端好友
+                            </span>
+                          )}
                         </div>
                         <div className="text-xs text-slate-500 font-mono-tabular">
                           星涟号 {c.qqNumber} · {c.groupName}

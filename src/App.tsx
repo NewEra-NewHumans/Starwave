@@ -132,6 +132,22 @@ import {
   updateCloudProfile,
   updateFriendInFirestore,
 } from './utils/accountService';
+import {
+  acceptFriendRequest,
+  cancelFriendRequest,
+  CloudChat,
+  CloudFriendRequest,
+  createGroupCloudChat,
+  ensureDirectCloudChat,
+  isCloudConversationId,
+  recallCloudChatMessage,
+  rejectFriendRequest,
+  sendCloudChatMessage,
+  sendFriendRequest,
+  subscribeToCloudChatMessages,
+  subscribeToCloudChats,
+  subscribeToFriendRequests,
+} from './utils/cloudChatService';
 import { apiUrl, wsUrl } from './utils/serverEndpoint';
 
 const ONLINE_STATUS_OPTIONS: Array<{
@@ -252,6 +268,36 @@ export default function App() {
   const [cloudAccount, setCloudAccount] = useState<CloudUserAccount | null>(null);
   const [allocatingAccountId, setAllocatingAccountId] = useState(false);
   const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [friendRequests, setFriendRequests] = useState<CloudFriendRequest[]>([]);
+  const [cloudChats, setCloudChats] = useState<CloudChat[]>([]);
+  const activeConvIdRef = useRef(activeConvId);
+  const prevCloudChatMetaRef = useRef<
+    Record<string, { preview: string; time: string; senderUid: string }>
+  >({});
+  const initializedCloudChatsRef = useRef(false);
+
+  useEffect(() => {
+    activeConvIdRef.current = activeConvId;
+  }, [activeConvId]);
+
+  const effectiveCloudAccount: CloudUserAccount | null = useMemo(() => {
+    if (!cloudAccount) return null;
+    return {
+      ...cloudAccount,
+      name: profile.name || cloudAccount.name,
+      avatar: profile.avatar || cloudAccount.avatar,
+      signature: profile.signature || cloudAccount.signature,
+      level: profile.level || cloudAccount.level,
+      activeDays: profile.activeDays || cloudAccount.activeDays,
+    };
+  }, [
+    cloudAccount,
+    profile.name,
+    profile.avatar,
+    profile.signature,
+    profile.level,
+    profile.activeDays,
+  ]);
 
   // Modals & Companion Preview
   const [createGroupOpen, setCreateGroupOpen] = useState(false);
@@ -379,6 +425,12 @@ export default function App() {
       setAuthUser(user);
       if (!user) {
         setCloudAccount(null);
+        setFriendRequests([]);
+        setCloudChats([]);
+        prevCloudChatMetaRef.current = {};
+        initializedCloudChatsRef.current = false;
+        setContacts((prev) => prev.filter((c) => !c.id.startsWith('uid-')));
+        setConversations((prev) => prev.filter((c) => !isCloudConversationId(c.id)));
         return;
       }
       if (user.emailVerified) {
@@ -388,42 +440,201 @@ export default function App() {
     return () => unsub();
   }, []);
 
-  // Subscribe to Firestore friends list once authenticated & verified
+  // Subscribe to Firestore friends, friend requests, and cloud chats once authenticated & verified
   useEffect(() => {
     if (!authUser || !authUser.emailVerified) return;
-    const unsub = subscribeToUserFriends(authUser.uid, (cloudFriends) => {
-      if (cloudFriends.length === 0) return;
+
+    const unsubFriends = subscribeToUserFriends(authUser.uid, (cloudFriends) => {
       setContacts((prev) => {
-        const map = new Map(prev.map((c) => [c.id, c]));
-        cloudFriends.forEach((cf) => {
-          map.set(cf.id, { ...map.get(cf.id), ...cf });
-        });
-        return Array.from(map.values());
-      });
-      setConversations((prev) => {
-        const existingTargetIds = new Set(prev.map((c) => c.targetContactId).filter(Boolean));
-        const newConvs: Conversation[] = [];
-        cloudFriends.forEach((cf) => {
-          if (!existingTargetIds.has(cf.id)) {
-            newConvs.push({
-              id: `conv-${cf.id}`,
-              kind: 'single',
-              title: cf.remark || cf.name,
-              avatar: cf.avatar,
-              targetContactId: cf.id,
-              pinned: false,
-              muted: false,
-              unreadCount: 0,
-              lastMessagePreview: '已同步云端好友连接，开始对话吧',
-              lastMessageTime: '刚刚',
-            });
-          }
-        });
-        return newConvs.length > 0 ? [...prev, ...newConvs] : prev;
+        const localOnly = prev.filter((c) => !c.id.startsWith('uid-'));
+        const prevMap = new Map(prev.map((c) => [c.id, c]));
+        const mergedCloud = cloudFriends.map((cf) => ({
+          ...prevMap.get(cf.id),
+          ...cf,
+        }));
+        return [...mergedCloud, ...localOnly];
       });
     });
-    return () => unsub();
+
+    const unsubRequests = subscribeToFriendRequests(authUser.uid, setFriendRequests);
+    const unsubChats = subscribeToCloudChats(authUser.uid, setCloudChats);
+
+    return () => {
+      unsubFriends();
+      unsubRequests();
+      unsubChats();
+    };
   }, [authUser]);
+
+  const cloudChatIdsKey = useMemo(
+    () => cloudChats.map((c) => c.chatId).join('|'),
+    [cloudChats]
+  );
+
+  // Subscribe to real-time messages for all joined cloud chats
+  useEffect(() => {
+    if (!authUser || !authUser.emailVerified || cloudChats.length === 0) return;
+
+    const unsubs = cloudChats.map((chat) =>
+      subscribeToCloudChatMessages(chat.chatId, authUser.uid, (msgs) => {
+        setMessagesByConv((prev) => {
+          const existingMap = new Map((prev[chat.chatId] || []).map((m) => [m.id, m]));
+          const merged = msgs.map((m) => {
+            const old = existingMap.get(m.id);
+            if (!old) return m;
+            return {
+              ...m,
+              translatedText: old.translatedText,
+              starred: old.starred,
+              burnRevealedAt: old.burnRevealedAt,
+              burned: old.burned,
+            };
+          });
+          return {
+            ...prev,
+            [chat.chatId]: merged,
+          };
+        });
+      })
+    );
+
+    return () => {
+      unsubs.forEach((fn) => fn());
+    };
+  }, [authUser, cloudChatIdsKey]);
+
+  // Synchronize cloudChats metadata into conversation list (resolving DM peer names/avatars)
+  useEffect(() => {
+    if (!authUser || !authUser.emailVerified) return;
+    if (cloudChats.length === 0) {
+      initializedCloudChatsRef.current = true;
+      return;
+    }
+
+    const myUid = authUser.uid;
+    const isInitialBatch = !initializedCloudChatsRef.current;
+    let shouldPlayIncomingSound = false;
+
+    setConversations((prev) => {
+      const prevMap = new Map(prev.map((c) => [c.id, c]));
+      const nonCloud = prev.filter((c) => !isCloudConversationId(c.id));
+
+      const syncedCloudConvs: Conversation[] = cloudChats.map((cc) => {
+        const existingConv = prevMap.get(cc.chatId);
+        let displayTitle = cc.title;
+        let displayAvatar = cc.avatar;
+        let targetContactId: string | undefined = existingConv?.targetContactId;
+
+        if (cc.kind === 'single') {
+          const peerUid = cc.memberUids.find((u) => u !== myUid) || '';
+          targetContactId = peerUid ? `uid-${peerUid}` : undefined;
+          const peerContact = peerUid
+            ? contacts.find((c) => c.id === `uid-${peerUid}`)
+            : undefined;
+          if (peerContact) {
+            displayTitle = peerContact.remark || peerContact.name;
+            displayAvatar = peerContact.avatar || displayAvatar;
+          } else if (peerUid) {
+            const reqFrom = friendRequests.find((r) => r.fromUid === peerUid);
+            const reqTo = friendRequests.find((r) => r.toUid === peerUid);
+            if (reqFrom) {
+              displayTitle = reqFrom.fromName;
+              displayAvatar = reqFrom.fromAvatar || displayAvatar;
+            } else if (reqTo) {
+              displayTitle = reqTo.toName;
+              displayAvatar = reqTo.toAvatar || displayAvatar;
+            }
+          }
+        }
+
+        const prevMeta = prevCloudChatMetaRef.current[cc.chatId];
+        const hasNewPeerActivity =
+          !isInitialBatch &&
+          Boolean(prevMeta) &&
+          (prevMeta.preview !== cc.lastMessagePreview ||
+            prevMeta.time !== cc.lastMessageTime) &&
+          cc.lastMessageSenderUid !== myUid &&
+          cc.chatId !== activeConvIdRef.current;
+
+        if (hasNewPeerActivity && !existingConv?.muted) {
+          shouldPlayIncomingSound = true;
+        }
+
+        prevCloudChatMetaRef.current[cc.chatId] = {
+          preview: cc.lastMessagePreview,
+          time: cc.lastMessageTime,
+          senderUid: cc.lastMessageSenderUid,
+        };
+
+        const mappedMembers =
+          cc.kind === 'group'
+            ? cc.memberUids.map((mUid) => {
+                if (mUid === myUid) {
+                  return {
+                    id: 'me',
+                    name: profile.name,
+                    avatar: profile.avatar,
+                    role: (cc.ownerUid === myUid ? 'owner' : 'member') as 'owner' | 'member',
+                    online: true,
+                    status: 'online' as const,
+                    platform: activePlatformView,
+                  };
+                }
+                const c = contacts.find((ct) => ct.id === `uid-${mUid}`);
+                return {
+                  id: `uid-${mUid}`,
+                  name: c?.remark || c?.name || `星涟好友`,
+                  avatar: c?.avatar,
+                  role: (cc.ownerUid === mUid ? 'owner' : 'member') as 'owner' | 'member',
+                  online: c?.online ?? true,
+                  status: (c?.online ? 'online' : 'invisible') as 'online' | 'invisible',
+                  platform: c?.platform || ('Web' as const),
+                };
+              })
+            : undefined;
+
+        return {
+          id: cc.chatId,
+          kind: cc.kind,
+          title: displayTitle,
+          avatar: displayAvatar,
+          targetContactId,
+          pinned: existingConv?.pinned ?? false,
+          muted: existingConv?.muted ?? false,
+          unreadCount:
+            cc.chatId === activeConvIdRef.current
+              ? 0
+              : (existingConv?.unreadCount ?? 0) + (hasNewPeerActivity ? 1 : 0),
+          lastMessagePreview: cc.lastMessagePreview || '开始对话吧',
+          lastMessageTime: cc.lastMessageTime || '刚刚',
+          maxMembers: cc.kind === 'group' ? 50 : undefined,
+          memberCount: cc.kind === 'group' ? cc.memberUids.length : undefined,
+          members: mappedMembers || existingConv?.members,
+          announcement:
+            existingConv?.announcement ||
+            (cc.kind === 'group' ? '云端多用户实时群聊已就绪' : undefined),
+          quickBar: existingConv?.quickBar,
+          checkIns: existingConv?.checkIns,
+          album: existingConv?.album,
+          activeCall: existingConv?.activeCall,
+          memos: existingConv?.memos,
+        };
+      });
+
+      return [...syncedCloudConvs, ...nonCloud];
+    });
+
+    initializedCloudChatsRef.current = true;
+    if (shouldPlayIncomingSound) {
+      const notif = notificationsRef.current;
+      if (notif.chatSounds.enabled && !notif.dndEnabled) {
+        playSoundEffect(
+          notif.chatSounds.perMessageType.incoming,
+          notif.chatSounds.masterVolume
+        );
+      }
+    }
+  }, [authUser, cloudChats, contacts, friendRequests, profile.name, profile.avatar, activePlatformView]);
 
   // Sync dark mode class on <html>
   useEffect(() => {
@@ -571,6 +782,75 @@ export default function App() {
   ) => {
     const now = new Date();
     const timestamp = now.toTimeString().slice(0, 5);
+    const preview =
+      partial.burnAfterSeconds
+        ? '[阅后即焚消息]'
+        : partial.type === 'image'
+        ? '[图片]'
+        : partial.type === 'voice'
+        ? `[语音 ${partial.voiceDurationSec || 5}"]`
+        : partial.type === 'file'
+        ? `[文件] ${partial.file?.name || partial.content}`
+        : partial.type === 'red_packet'
+        ? `[心意红包] ${partial.redPacket?.title || '恭喜发财'}`
+        : partial.content;
+
+    const targetConv = conversations.find((c) => c.id === convId);
+    const isCloudConv = isCloudConversationId(convId);
+
+    if (isCloudConv) {
+      if (!authUser || !authUser.emailVerified || !effectiveCloudAccount) {
+        showToast('请先登录并完成邮箱验证后再发送云端消息');
+        setAuthModalOpen(true);
+        return;
+      }
+      const targetCloudChat = cloudChats.find((c) => c.chatId === convId);
+      const memberUids = targetCloudChat?.memberUids || [effectiveCloudAccount.uid];
+      try {
+        const sentId = await sendCloudChatMessage(
+          convId,
+          effectiveCloudAccount,
+          memberUids,
+          partial,
+          preview,
+          timestamp
+        );
+        if (partial.type === 'file' && partial.file) {
+          setStoredFiles((prev) => [
+            {
+              id: `sf-${Date.now()}`,
+              name: partial.file!.name,
+              sizeBytes: partial.file!.sizeBytes,
+              fileType: partial.file!.fileType,
+              conversationId: convId,
+              conversationTitle: targetConv?.title || '云端会话',
+              messageId: sentId,
+              senderName: effectiveCloudAccount.name,
+              dateStr: now.toISOString().slice(0, 10),
+              timeStr: timestamp,
+            },
+            ...prev,
+          ]);
+        }
+        if (
+          notifications.chatSounds.enabled &&
+          !notifications.dndEnabled &&
+          !targetConv?.muted
+        ) {
+          const cat = resolveMessageSoundCategory(partial.type, false);
+          const mappedSound = notifications.chatSounds.perMessageType[cat];
+          playSoundEffect(mappedSound, notifications.chatSounds.masterVolume);
+        }
+        setLastSyncTime(timestamp);
+        if (partial.type !== 'system') {
+          handleClaimGrowthTask('chat_active', true);
+        }
+      } catch (err) {
+        showToast(err instanceof Error ? err.message : '云端消息发送失败，请稍后重试');
+      }
+      return;
+    }
+
     const newMsg: ChatMessage = {
       id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       conversationId: convId,
@@ -586,19 +866,6 @@ export default function App() {
       ...prev,
       [convId]: [...(prev[convId] || []), newMsg],
     }));
-
-    const preview =
-      partial.burnAfterSeconds
-        ? '[阅后即焚消息]'
-        : partial.type === 'image'
-        ? '[图片]'
-        : partial.type === 'voice'
-        ? `[语音 ${partial.voiceDurationSec || 5}"]`
-        : partial.type === 'file'
-        ? `[文件] ${partial.file?.name || partial.content}`
-        : partial.type === 'red_packet'
-        ? `[心意红包] ${partial.redPacket?.title || '恭喜发财'}`
-        : partial.content;
 
     setConversations((prev) =>
       prev.map((c) =>
@@ -632,7 +899,6 @@ export default function App() {
       ]);
     }
 
-    const targetConv = conversations.find((c) => c.id === convId);
     if (
       notifications.chatSounds.enabled &&
       !notifications.dndEnabled &&
@@ -697,6 +963,11 @@ export default function App() {
   };
 
   const handleRecallMessage = (convId: string, msgId: string) => {
+    if (isCloudConversationId(convId)) {
+      void recallCloudChatMessage(convId, msgId);
+      showToast('已撤回云端消息');
+      return;
+    }
     setMessagesByConv((prev) => ({
       ...prev,
       [convId]: (prev[convId] || []).map((m) =>
@@ -1059,7 +1330,127 @@ export default function App() {
     setViewingProfileContact(fallbackContact);
   };
 
-  const handleStartSingleChat = (contact: Contact) => {
+  const handleSendFriendRequest = async (contact: Contact, note: string) => {
+    if (!authUser || !authUser.emailVerified || !effectiveCloudAccount) {
+      showToast('请先登录并完成邮箱验证，再发送云端好友申请');
+      setAuthModalOpen(true);
+      return;
+    }
+    const targetUid = contact.id.replace(/^uid-/, '');
+    try {
+      const outcome = await sendFriendRequest(
+        effectiveCloudAccount,
+        {
+          accountId: contact.qqNumber,
+          uid: targetUid,
+          name: contact.name,
+          avatar: contact.avatar || '',
+          signature: contact.signature,
+          emailProvider: 'google',
+          level: contact.level || 1,
+          online: contact.online,
+          platform: contact.platform,
+        },
+        note,
+        friendRequests
+      );
+      if (outcome === 'sent') {
+        showToast(`已向 ${contact.name}（星涟号 ${contact.qqNumber}）发送好友申请`);
+      } else if (outcome === 'resent') {
+        showToast(`已重新向 ${contact.name} 发送好友申请`);
+      } else if (outcome === 'already_pending') {
+        showToast('您已向对方发送过申请，请耐心等待对方验证');
+      } else if (outcome === 'incoming_exists') {
+        showToast('对方已经向您发来好友申请，请在「申请」列表点击同意即可');
+      } else if (outcome === 'already_accepted') {
+        showToast('对方已通过您的好友申请');
+      }
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : '发送好友申请失败');
+    }
+  };
+
+  const handleAcceptFriendRequest = async (req: CloudFriendRequest) => {
+    if (!authUser || !authUser.emailVerified || !effectiveCloudAccount) {
+      showToast('请先登录并验证邮箱');
+      setAuthModalOpen(true);
+      return;
+    }
+    try {
+      const existingIds = new Set(contacts.map((c) => c.id));
+      const dmChatId = await acceptFriendRequest(
+        req,
+        effectiveCloudAccount,
+        existingIds,
+        cloudChats
+      );
+      showToast(`已同意 ${req.fromName} 的好友申请，双方已互加好友`);
+      setActiveConvId(dmChatId);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : '同意好友申请失败');
+    }
+  };
+
+  const handleRejectFriendRequest = async (requestId: string) => {
+    try {
+      await rejectFriendRequest(requestId);
+      showToast('已拒绝该好友申请');
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : '操作失败');
+    }
+  };
+
+  const handleCancelFriendRequest = async (requestId: string) => {
+    try {
+      await cancelFriendRequest(requestId);
+      showToast('已撤回该好友申请');
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : '撤回失败');
+    }
+  };
+
+  const handleStartSingleChat = async (contact: Contact) => {
+    if (contact.id.startsWith('uid-')) {
+      if (!authUser || !authUser.emailVerified || !effectiveCloudAccount) {
+        showToast('请先登录并完成邮箱验证后再发起云端私聊');
+        setAuthModalOpen(true);
+        return;
+      }
+      const peerUid = contact.id.replace(/^uid-/, '');
+      try {
+        const dmChatId = await ensureDirectCloudChat(
+          effectiveCloudAccount,
+          peerUid,
+          contact.remark || contact.name,
+          contact.avatar || '',
+          cloudChats
+        );
+        setConversations((prev) => {
+          if (prev.some((c) => c.id === dmChatId)) return prev;
+          return [
+            {
+              id: dmChatId,
+              kind: 'single',
+              title: contact.remark || contact.name,
+              avatar: contact.avatar,
+              targetContactId: contact.id,
+              pinned: false,
+              muted: false,
+              unreadCount: 0,
+              lastMessagePreview: '已建立云端会话，开始对话吧',
+              lastMessageTime: '刚刚',
+            },
+            ...prev,
+          ];
+        });
+        setActiveConvId(dmChatId);
+        setSection('chat');
+      } catch (err) {
+        showToast(err instanceof Error ? err.message : '创建云端会话失败');
+      }
+      return;
+    }
+
     const found = conversations.find((c) => c.targetContactId === contact.id);
     if (found) {
       setActiveConvId(found.id);
@@ -1116,6 +1507,9 @@ export default function App() {
   };
 
   const totalUnread = conversations.reduce((s, c) => s + c.unreadCount, 0);
+  const pendingIncomingRequestsCount = authUser
+    ? friendRequests.filter((r) => r.toUid === authUser.uid && r.status === 'pending').length
+    : 0;
   const minimalMode = mode === 'minimal';
   const careMode = mode === 'care';
   const currentStatusMeta =
@@ -1128,7 +1522,7 @@ export default function App() {
     badge?: number;
   }> = [
     { id: 'chat', label: '消息', icon: MessageSquare, badge: totalUnread },
-    { id: 'contacts', label: '联系人', icon: Users },
+    { id: 'contacts', label: '联系人', icon: Users, badge: pendingIncomingRequestsCount },
     { id: 'channels', label: '频道', icon: Hash },
     { id: 'qzone', label: '空间', icon: Compass },
     { id: 'profile', label: '我的', icon: User },
@@ -1523,18 +1917,27 @@ export default function App() {
                   <Icon className={careMode ? 'w-5 h-5' : 'w-4 h-4'} />
                   <span className="text-[10px] font-medium whitespace-nowrap">{item.label}</span>
                   {item.badge && item.badge > 0 ? (
-                    <DraggableUnreadBadge
-                      count={item.badge}
-                      soundEnabled={notifications.chatSounds.enabled}
-                      title="长按拖拽红点可一键清除全部未读"
-                      className="absolute top-0.5 right-1.5 !min-w-[16px] !h-[16px] ring-2 ring-[#0b1222]"
-                      onDismiss={() => {
-                        setConversations((prev) =>
-                          prev.map((c) => ({ ...c, unreadCount: 0 }))
-                        );
-                        showToast('已拖拽清除全部未读消息红点');
-                      }}
-                    />
+                    item.id === 'chat' ? (
+                      <DraggableUnreadBadge
+                        count={item.badge}
+                        soundEnabled={notifications.chatSounds.enabled}
+                        title="长按拖拽红点可一键清除全部未读"
+                        className="absolute top-0.5 right-1.5 !min-w-[16px] !h-[16px] ring-2 ring-[#0b1222]"
+                        onDismiss={() => {
+                          setConversations((prev) =>
+                            prev.map((c) => ({ ...c, unreadCount: 0 }))
+                          );
+                          showToast('已拖拽清除全部未读消息红点');
+                        }}
+                      />
+                    ) : (
+                      <span
+                        title={`${item.badge} 条待处理好友申请`}
+                        className="absolute top-0.5 right-1.5 min-w-[16px] h-[16px] px-1 rounded-full bg-rose-500 text-white text-[9px] font-mono-tabular font-bold flex items-center justify-center ring-2 ring-[#0b1222]"
+                      >
+                        {item.badge > 99 ? '99+' : item.badge}
+                      </span>
+                    )
                   ) : null}
                 </button>
               );
@@ -2161,6 +2564,14 @@ export default function App() {
             <ContactsPanel
               contacts={contacts}
               myAccountId={profile.qqNumber}
+              myDisplayName={profile.name}
+              currentUid={authUser && authUser.emailVerified ? authUser.uid : undefined}
+              friendRequests={friendRequests}
+              onOpenAuthModal={() => setAuthModalOpen(true)}
+              onSendFriendRequest={handleSendFriendRequest}
+              onAcceptFriendRequest={handleAcceptFriendRequest}
+              onRejectFriendRequest={handleRejectFriendRequest}
+              onCancelFriendRequest={handleCancelFriendRequest}
               onLookupAccountById={handleLookupAccountById}
               onUpdateContact={(id, patch) => {
                 setContacts((prev) => prev.map((c) => (c.id === id ? { ...c, ...patch } : c)));
@@ -2704,7 +3115,50 @@ export default function App() {
         onClose={() => setCreateGroupOpen(false)}
         contacts={contacts}
         conversations={conversations}
+        currentUserName={profile.name}
+        currentUserAvatar={profile.avatar}
         onCreateGroup={(title, maxMembers, members) => {
+          const cloudMemberUids = members
+            .filter((m) => m.id.startsWith('uid-'))
+            .map((m) => m.id.replace(/^uid-/, ''));
+          if (authUser && authUser.emailVerified && effectiveCloudAccount && cloudMemberUids.length > 0) {
+            void createGroupCloudChat(effectiveCloudAccount, title, cloudMemberUids)
+              .then((cloudGroupId) => {
+                const newCloudGroup: Conversation = {
+                  id: cloudGroupId,
+                  kind: 'group',
+                  title,
+                  pinned: false,
+                  muted: false,
+                  unreadCount: 0,
+                  lastMessagePreview: '云端群聊已创建，欢迎加入',
+                  lastMessageTime: '刚刚',
+                  maxMembers: 50,
+                  memberCount: cloudMemberUids.length + 1,
+                  members,
+                  announcement: '云端多用户实时群聊已就绪！',
+                  quickBar: [
+                    { id: 'notices', label: '通知', enabled: true },
+                    { id: 'toolbox', label: '工具箱', enabled: true },
+                    { id: 'directory', label: '通讯录', enabled: true },
+                    { id: 'docs', label: '文档', enabled: true },
+                    { id: 'channel', label: '频道', enabled: true },
+                  ],
+                  checkIns: [],
+                };
+                setConversations((prev) =>
+                  prev.some((c) => c.id === cloudGroupId) ? prev : [newCloudGroup, ...prev]
+                );
+                setActiveConvId(cloudGroupId);
+                setSection('chat');
+                showToast(`已创建云端多人群聊「${title}」`);
+              })
+              .catch((err) => {
+                showToast(err instanceof Error ? err.message : '创建云端群聊失败');
+              });
+            return;
+          }
+
           const newGroup: Conversation = {
             id: `conv-g-${Date.now()}`,
             kind: 'group',

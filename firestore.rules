@@ -44,6 +44,11 @@ service cloud.firestore {
       return platform in ['Windows', 'macOS', 'iOS', 'Android', 'iPadOS', 'Web'];
     }
 
+    function isChatMember(chatId) {
+      return exists(/databases/$(database)/documents/chats/$(chatId))
+        && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.memberUids;
+    }
+
     // 3. Entity Validation Blueprints
     function isValidUser(data, userId) {
       return data.keys().hasAll([
@@ -123,7 +128,6 @@ service cloud.firestore {
       isValidId(data.friendId) &&
       data.friendId == fid &&
       isValidId(data.uid) &&
-      data.uid == request.auth.uid &&
       data.uid == userId &&
       isValidAccountId(data.accountId) &&
       data.name is string &&
@@ -147,6 +151,137 @@ service cloud.firestore {
       data.level is int &&
       data.level >= 1 &&
       data.level <= 200 &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
+    function isValidFriendRequest(data, rid) {
+      return data.keys().hasAll([
+        'requestId', 'fromUid', 'fromAccountId', 'fromName', 'fromAvatar',
+        'fromSignature', 'fromLevel', 'toUid', 'toAccountId', 'toName',
+        'toAvatar', 'note', 'status', 'createdAt', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'requestId', 'fromUid', 'fromAccountId', 'fromName', 'fromAvatar',
+        'fromSignature', 'fromLevel', 'toUid', 'toAccountId', 'toName',
+        'toAvatar', 'note', 'status', 'createdAt', 'updatedAt'
+      ]) &&
+      isValidId(data.requestId) &&
+      data.requestId == rid &&
+      isValidId(data.fromUid) &&
+      isValidAccountId(data.fromAccountId) &&
+      data.fromName is string &&
+      data.fromName.size() >= 1 &&
+      data.fromName.size() <= 40 &&
+      data.fromAvatar is string &&
+      data.fromAvatar.size() <= 500 &&
+      data.fromSignature is string &&
+      data.fromSignature.size() <= 160 &&
+      data.fromLevel is int &&
+      data.fromLevel >= 1 &&
+      data.fromLevel <= 200 &&
+      isValidId(data.toUid) &&
+      data.toUid != data.fromUid &&
+      isValidAccountId(data.toAccountId) &&
+      data.toName is string &&
+      data.toName.size() >= 1 &&
+      data.toName.size() <= 40 &&
+      data.toAvatar is string &&
+      data.toAvatar.size() <= 500 &&
+      data.note is string &&
+      data.note.size() <= 120 &&
+      data.status in ['pending', 'accepted', 'rejected'] &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
+    function isValidChat(data, cid) {
+      return data.keys().hasAll([
+        'chatId', 'kind', 'title', 'avatar', 'ownerUid', 'memberUids',
+        'lastMessagePreview', 'lastMessageTime', 'lastMessageSenderUid',
+        'createdAt', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'chatId', 'kind', 'title', 'avatar', 'ownerUid', 'memberUids',
+        'lastMessagePreview', 'lastMessageTime', 'lastMessageSenderUid',
+        'createdAt', 'updatedAt'
+      ]) &&
+      isValidId(data.chatId) &&
+      data.chatId == cid &&
+      data.kind in ['single', 'group'] &&
+      data.title is string &&
+      data.title.size() >= 1 &&
+      data.title.size() <= 60 &&
+      data.avatar is string &&
+      data.avatar.size() <= 500 &&
+      isValidId(data.ownerUid) &&
+      data.memberUids is list &&
+      (
+        (data.kind == 'single' && data.memberUids.size() == 2) ||
+        (data.kind == 'group' && data.memberUids.size() >= 1 && data.memberUids.size() <= 50)
+      ) &&
+      data.memberUids[0] is string &&
+      data.lastMessagePreview is string &&
+      data.lastMessagePreview.size() <= 200 &&
+      data.lastMessageTime is string &&
+      data.lastMessageTime.size() <= 20 &&
+      data.lastMessageSenderUid is string &&
+      data.lastMessageSenderUid.size() <= 128 &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
+    function isValidChatMessage(data, cid, mid) {
+      return data.keys().hasAll([
+        'messageId', 'chatId', 'senderUid', 'senderAccountId', 'senderName',
+        'senderAvatar', 'type', 'content', 'timestampLabel', 'recalled',
+        'burnAfterSeconds', 'replyToSender', 'replyToPreview', 'fileName',
+        'fileSizeBytes', 'fileType', 'imageUrl', 'memberUids', 'createdAt', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'messageId', 'chatId', 'senderUid', 'senderAccountId', 'senderName',
+        'senderAvatar', 'type', 'content', 'timestampLabel', 'recalled',
+        'burnAfterSeconds', 'replyToSender', 'replyToPreview', 'fileName',
+        'fileSizeBytes', 'fileType', 'imageUrl', 'memberUids', 'createdAt', 'updatedAt'
+      ]) &&
+      isValidId(data.messageId) &&
+      data.messageId == mid &&
+      isValidId(data.chatId) &&
+      data.chatId == cid &&
+      isValidId(data.senderUid) &&
+      isValidAccountId(data.senderAccountId) &&
+      data.senderName is string &&
+      data.senderName.size() >= 1 &&
+      data.senderName.size() <= 40 &&
+      data.senderAvatar is string &&
+      data.senderAvatar.size() <= 500 &&
+      data.type in ['text', 'image', 'file', 'voice', 'system', 'red_packet'] &&
+      data.content is string &&
+      data.content.size() <= 4000 &&
+      data.timestampLabel is string &&
+      data.timestampLabel.size() >= 1 &&
+      data.timestampLabel.size() <= 20 &&
+      data.recalled is bool &&
+      data.burnAfterSeconds is int &&
+      data.burnAfterSeconds >= 0 &&
+      data.burnAfterSeconds <= 3600 &&
+      data.replyToSender is string &&
+      data.replyToSender.size() <= 40 &&
+      data.replyToPreview is string &&
+      data.replyToPreview.size() <= 120 &&
+      data.fileName is string &&
+      data.fileName.size() <= 200 &&
+      data.fileSizeBytes is int &&
+      data.fileSizeBytes >= 0 &&
+      data.fileSizeBytes <= 10737418240 &&
+      data.fileType is string &&
+      data.fileType.size() <= 40 &&
+      data.imageUrl is string &&
+      data.imageUrl.size() <= 250000 &&
+      data.memberUids is list &&
+      data.memberUids.size() >= 1 &&
+      data.memberUids.size() <= 50 &&
+      data.memberUids[0] is string &&
       data.createdAt is timestamp &&
       data.updatedAt is timestamp;
     }
@@ -181,7 +316,7 @@ service cloud.firestore {
 
       allow delete: if false;
 
-      // 5. Friends Subcollection (Master Gate + Query Enforcer)
+      // 5. Friends Subcollection (Master Gate + Atomic Mutual Acceptance)
       match /friends/{friendId} {
         allow get: if isSignedIn()
           && isValidId(userId)
@@ -195,11 +330,21 @@ service cloud.firestore {
         allow create: if isVerifiedUser()
           && isValidId(userId)
           && isValidId(friendId)
-          && isOwner(userId)
           && isValidFriend(incoming(), userId, friendId)
           && incoming().createdAt == request.time
           && incoming().updatedAt == request.time
-          && exists(/databases/$(database)/documents/users/$(userId));
+          && exists(/databases/$(database)/documents/users/$(userId))
+          && (
+            isOwner(userId) ||
+            (
+              userId != request.auth.uid
+              && friendId == ('uid-' + request.auth.uid)
+              && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+              && exists(/databases/$(database)/documents/friend_requests/$(userId + '_' + request.auth.uid))
+              && get(/databases/$(database)/documents/friend_requests/$(userId + '_' + request.auth.uid)).data.status == 'pending'
+              && getAfter(/databases/$(database)/documents/friend_requests/$(userId + '_' + request.auth.uid)).data.status == 'accepted'
+            )
+          );
 
         allow update: if isVerifiedUser()
           && isValidId(userId)
@@ -258,6 +403,150 @@ service cloud.firestore {
         ]);
 
       allow delete: if false;
+    }
+
+    // 7. Mutual Friend Requests (Deterministic ID: fromUid_toUid)
+    match /friend_requests/{requestId} {
+      allow get: if isSignedIn()
+        && isValidId(requestId)
+        && (existing().fromUid == request.auth.uid || existing().toUid == request.auth.uid);
+
+      allow list: if isSignedIn()
+        && (resource.data.toUid == request.auth.uid || resource.data.fromUid == request.auth.uid);
+
+      allow create: if isVerifiedUser()
+        && isValidId(requestId)
+        && isValidFriendRequest(incoming(), requestId)
+        && requestId == (incoming().fromUid + '_' + incoming().toUid)
+        && incoming().fromUid == request.auth.uid
+        && incoming().status == 'pending'
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && exists(/databases/$(database)/documents/account_ids/$(incoming().toAccountId))
+        && get(/databases/$(database)/documents/account_ids/$(incoming().toAccountId)).data.uid == incoming().toUid;
+
+      allow update: if isVerifiedUser()
+        && isValidId(requestId)
+        && isValidFriendRequest(incoming(), requestId)
+        && incoming().requestId == existing().requestId
+        && incoming().fromUid == existing().fromUid
+        && incoming().fromAccountId == existing().fromAccountId
+        && incoming().toUid == existing().toUid
+        && incoming().toAccountId == existing().toAccountId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          (
+            existing().toUid == request.auth.uid
+            && existing().status == 'pending'
+            && incoming().status in ['accepted', 'rejected']
+            && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])
+          ) ||
+          (
+            existing().fromUid == request.auth.uid
+            && existing().status == 'rejected'
+            && incoming().status == 'pending'
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'fromName', 'fromAvatar', 'fromSignature', 'fromLevel', 'note', 'status', 'updatedAt'
+            ])
+          )
+        );
+
+      allow delete: if isVerifiedUser()
+        && isValidId(requestId)
+        && (existing().fromUid == request.auth.uid || existing().toUid == request.auth.uid)
+        && existing().status != 'accepted';
+    }
+
+    // 8. Shared Cloud Chats (Direct & Group Chats)
+    match /chats/{chatId} {
+      allow get: if isSignedIn()
+        && isValidId(chatId)
+        && request.auth.uid in existing().memberUids;
+
+      allow list: if isSignedIn()
+        && request.auth.uid in resource.data.memberUids;
+
+      allow create: if isVerifiedUser()
+        && isValidId(chatId)
+        && isValidChat(incoming(), chatId)
+        && incoming().ownerUid == request.auth.uid
+        && request.auth.uid in incoming().memberUids
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+
+      allow update: if isVerifiedUser()
+        && isValidId(chatId)
+        && isValidChat(incoming(), chatId)
+        && request.auth.uid in existing().memberUids
+        && incoming().chatId == existing().chatId
+        && incoming().kind == existing().kind
+        && incoming().ownerUid == existing().ownerUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          (
+            incoming().lastMessageSenderUid == request.auth.uid &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'lastMessagePreview', 'lastMessageTime', 'lastMessageSenderUid', 'updatedAt'
+            ])
+          ) ||
+          (
+            existing().kind == 'group'
+            && existing().ownerUid == request.auth.uid
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'title', 'avatar', 'memberUids', 'updatedAt'
+            ])
+          )
+        );
+
+      allow delete: if false;
+
+      // 9. Cloud Chat Messages Subcollection (Master Gate + Query Enforcer)
+      match /messages/{messageId} {
+        allow get: if isSignedIn()
+          && isValidId(chatId)
+          && isValidId(messageId)
+          && isChatMember(chatId);
+
+        allow list: if isSignedIn()
+          && request.auth.uid in resource.data.memberUids;
+
+        allow create: if isVerifiedUser()
+          && isValidId(chatId)
+          && isValidId(messageId)
+          && isValidChatMessage(incoming(), chatId, messageId)
+          && incoming().senderUid == request.auth.uid
+          && incoming().recalled == false
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && isChatMember(chatId)
+          && incoming().memberUids == get(/databases/$(database)/documents/chats/$(chatId)).data.memberUids;
+
+        allow update: if isVerifiedUser()
+          && isValidId(chatId)
+          && isValidId(messageId)
+          && isValidChatMessage(incoming(), chatId, messageId)
+          && isChatMember(chatId)
+          && existing().senderUid == request.auth.uid
+          && existing().recalled == false
+          && incoming().recalled == true
+          && incoming().messageId == existing().messageId
+          && incoming().chatId == existing().chatId
+          && incoming().senderUid == existing().senderUid
+          && incoming().senderAccountId == existing().senderAccountId
+          && incoming().type == existing().type
+          && incoming().memberUids == existing().memberUids
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'recalled', 'content', 'updatedAt'
+          ]);
+
+        allow delete: if false;
+      }
     }
   }
 }

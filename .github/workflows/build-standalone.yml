@@ -1,0 +1,224 @@
+name: Build Standalone Cross-Platform Apps
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+    inputs:
+      server_url:
+        description: 'Deployed StarRipple Server HTTPS URL (optional, overrides STARRIPPLE_SERVER_URL variable)'
+        required: false
+        default: ''
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-web:
+    name: Build & Package Web Assets
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: TypeScript type check
+        run: npm run lint
+
+      - name: Build Web bundle (dist/)
+        run: npm run build
+        env:
+          VITE_SERVER_URL: ${{ github.event.inputs.server_url || vars.STARRIPPLE_SERVER_URL || '' }}
+
+      - name: Upload shared Web build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: starripple-web-dist
+          path: dist/
+          retention-days: 14
+
+  build-windows:
+    name: Package Windows (.exe)
+    needs: build-web
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Download shared Web build
+        uses: actions/download-artifact@v4
+        with:
+          name: starripple-web-dist
+          path: dist
+
+      - name: Install dependencies & Electron Builder
+        run: |
+          npm ci --legacy-peer-deps
+          npm i --no-save electron electron-builder --legacy-peer-deps
+
+      - name: Build Windows NSIS installer (.exe)
+        run: npx electron-builder --win --config electron-builder.json --publish never
+
+      - name: Upload Windows installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: starripple-windows-installer
+          path: release/**/*.exe
+          retention-days: 30
+
+  build-macos:
+    name: Package macOS (.dmg / .zip)
+    needs: build-web
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Download shared Web build
+        uses: actions/download-artifact@v4
+        with:
+          name: starripple-web-dist
+          path: dist
+
+      - name: Install dependencies & Electron Builder
+        run: |
+          npm ci --legacy-peer-deps
+          npm i --no-save electron electron-builder --legacy-peer-deps
+
+      - name: Build macOS Disk Image (.dmg / .zip)
+        run: npx electron-builder --mac --config electron-builder.json --publish never
+
+      - name: Upload macOS installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: starripple-macos-installer
+          path: |
+            release/**/*.dmg
+            release/**/*.zip
+          retention-days: 30
+
+  build-android:
+    name: Package Android (.apk)
+    needs: build-web
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Setup Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Download shared Web build
+        uses: actions/download-artifact@v4
+        with:
+          name: starripple-web-dist
+          path: dist
+
+      - name: Install dependencies & Capacitor Android
+        run: |
+          npm ci --legacy-peer-deps
+          npm i --no-save @capacitor/core @capacitor/cli @capacitor/android --legacy-peer-deps
+
+      - name: Generate & sync Capacitor Android project
+        run: |
+          if [ ! -d "android" ]; then
+            npx cap add android
+          fi
+          npx cap sync android
+
+      - name: Build Debug & Release APKs
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug assembleRelease
+
+      - name: Upload Android APK artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: starripple-android-apk
+          path: android/app/build/outputs/apk/**/*.apk
+          retention-days: 30
+
+  build-ios:
+    name: Package iOS (.xcarchive / .ipa)
+    needs: build-web
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Download shared Web build
+        uses: actions/download-artifact@v4
+        with:
+          name: starripple-web-dist
+          path: dist
+
+      - name: Install dependencies & Capacitor iOS
+        run: |
+          npm ci --legacy-peer-deps
+          npm i --no-save @capacitor/core @capacitor/cli @capacitor/ios --legacy-peer-deps
+
+      - name: Generate & sync Capacitor iOS project
+        run: |
+          if [ ! -d "ios" ]; then
+            npx cap add ios
+          fi
+          npx cap sync ios
+
+      - name: Archive & package iOS (.xcarchive & unsigned .ipa)
+        run: |
+          if [ -d "ios/App/App.xcworkspace" ]; then
+            xcodebuild -workspace ios/App/App.xcworkspace -scheme App -configuration Release -sdk iphoneos -archivePath build/StarRipple.xcarchive archive CODE_SIGNING_ALLOWED=NO
+          else
+            xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Release -sdk iphoneos -archivePath build/StarRipple.xcarchive archive CODE_SIGNING_ALLOWED=NO
+          fi
+          mkdir -p build/ipa/Payload
+          cp -R build/StarRipple.xcarchive/Products/Applications/*.app build/ipa/Payload/
+          (cd build/ipa && zip -qry ../StarRipple-unsigned.ipa Payload)
+
+      - name: Upload iOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: starripple-ios-package
+          path: |
+            build/StarRipple.xcarchive
+            build/StarRipple-unsigned.ipa
+          retention-days: 30

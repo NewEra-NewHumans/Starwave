@@ -1,0 +1,91 @@
+name: Build Cross-Platform Installers
+
+on:
+  workflow_dispatch:
+    inputs:
+      server_url:
+        description: 'Deployed StarRipple Server HTTPS URL (optional)'
+        required: false
+        default: ''
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci --legacy-peer-deps
+      - run: npm run build
+        env:
+          VITE_SERVER_URL: ${{ github.event.inputs.server_url || vars.STARRIPPLE_SERVER_URL || '' }}
+      - run: npm i --no-save electron electron-builder --legacy-peer-deps
+      - run: npx electron-builder --win --config electron-builder.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: starripple-windows-installer
+          path: release/**/*.exe
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci --legacy-peer-deps
+      - run: npm run build
+        env:
+          VITE_SERVER_URL: ${{ github.event.inputs.server_url || vars.STARRIPPLE_SERVER_URL || '' }}
+      - run: npm i --no-save electron electron-builder --legacy-peer-deps
+      - run: npx electron-builder --mac --config electron-builder.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: starripple-macos-dmg
+          path: release/**/*.dmg
+
+  build-android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      - run: npm ci --legacy-peer-deps
+      - run: npm run build
+        env:
+          VITE_SERVER_URL: ${{ github.event.inputs.server_url || vars.STARRIPPLE_SERVER_URL || '' }}
+      - run: npm i --no-save @capacitor/core @capacitor/cli @capacitor/android --legacy-peer-deps
+      - run: npx cap add android && npx cap sync android
+      - run: cd android && ./gradlew assembleDebug assembleRelease
+      - uses: actions/upload-artifact@v4
+        with:
+          name: starripple-android-apk
+          path: android/app/build/outputs/apk/**/*.apk
+
+  build-ios:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci --legacy-peer-deps
+      - run: npm run build
+        env:
+          VITE_SERVER_URL: ${{ github.event.inputs.server_url || vars.STARRIPPLE_SERVER_URL || '' }}
+      - run: npm i --no-save @capacitor/core @capacitor/cli @capacitor/ios --legacy-peer-deps
+      - run: npx cap add ios && npx cap sync ios
+      - run: xcodebuild -workspace ios/App/App.xcworkspace -scheme App -configuration Release -sdk iphoneos -archivePath build/StarRipple.xcarchive archive CODE_SIGNING_ALLOWED=NO
+      - uses: actions/upload-artifact@v4
+        with:
+          name: starripple-ios-xcarchive
+          path: build/StarRipple.xcarchive

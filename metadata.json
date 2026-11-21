@@ -1,0 +1,11 @@
+{
+  "name": "星涟 StarRipple · 全端即时通讯与协作平台",
+  "description": "原创跨端即时通讯与高效协作工作台，支持 Google/Microsoft 邮箱注册并领取专属星涟号、通过星涟号添加好友、AI 群总结、音视频通话、10GB 极速快传与时光广场。",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

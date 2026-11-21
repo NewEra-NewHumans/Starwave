@@ -1,0 +1,263 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Safety Net (Default Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. Global Hardened Primitives
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidAccountId(aid) {
+      return aid is string && aid.size() == 9 && aid.matches('^[1-9][0-9]{8}$');
+    }
+
+    function isValidEmailProvider(provider) {
+      return provider in ['google', 'microsoft'];
+    }
+
+    function isValidPlatform(platform) {
+      return platform in ['Windows', 'macOS', 'iOS', 'Android', 'iPadOS', 'Web'];
+    }
+
+    // 3. Entity Validation Blueprints
+    function isValidUser(data, userId) {
+      return data.keys().hasAll([
+        'uid', 'email', 'emailProvider', 'accountId', 'name', 'avatar',
+        'signature', 'level', 'activeDays', 'createdAt', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'uid', 'email', 'emailProvider', 'accountId', 'name', 'avatar',
+        'signature', 'level', 'activeDays', 'createdAt', 'updatedAt'
+      ]) &&
+      isValidId(data.uid) &&
+      data.uid == request.auth.uid &&
+      data.uid == userId &&
+      data.email is string &&
+      data.email.size() >= 5 &&
+      data.email.size() <= 160 &&
+      isValidEmailProvider(data.emailProvider) &&
+      isValidAccountId(data.accountId) &&
+      data.name is string &&
+      data.name.size() >= 1 &&
+      data.name.size() <= 40 &&
+      data.avatar is string &&
+      data.avatar.size() <= 500 &&
+      data.signature is string &&
+      data.signature.size() <= 160 &&
+      data.level is int &&
+      data.level >= 1 &&
+      data.level <= 200 &&
+      data.activeDays is int &&
+      data.activeDays >= 0 &&
+      data.activeDays <= 100000 &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
+    function isValidAccountIndex(data, aid) {
+      return data.keys().hasAll([
+        'accountId', 'uid', 'name', 'avatar', 'signature', 'emailProvider',
+        'level', 'online', 'platform', 'createdAt', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'accountId', 'uid', 'name', 'avatar', 'signature', 'emailProvider',
+        'level', 'online', 'platform', 'createdAt', 'updatedAt'
+      ]) &&
+      isValidAccountId(data.accountId) &&
+      data.accountId == aid &&
+      isValidId(data.uid) &&
+      data.uid == request.auth.uid &&
+      data.name is string &&
+      data.name.size() >= 1 &&
+      data.name.size() <= 40 &&
+      data.avatar is string &&
+      data.avatar.size() <= 500 &&
+      data.signature is string &&
+      data.signature.size() <= 160 &&
+      isValidEmailProvider(data.emailProvider) &&
+      data.level is int &&
+      data.level >= 1 &&
+      data.level <= 200 &&
+      data.online is bool &&
+      isValidPlatform(data.platform) &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
+    function isValidFriend(data, userId, fid) {
+      return data.keys().hasAll([
+        'friendId', 'uid', 'accountId', 'name', 'remark', 'avatar', 'signature',
+        'groupName', 'starred', 'sparkDays', 'online', 'platform', 'level',
+        'createdAt', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'friendId', 'uid', 'accountId', 'name', 'remark', 'avatar', 'signature',
+        'groupName', 'starred', 'sparkDays', 'online', 'platform', 'level',
+        'createdAt', 'updatedAt'
+      ]) &&
+      isValidId(data.friendId) &&
+      data.friendId == fid &&
+      isValidId(data.uid) &&
+      data.uid == request.auth.uid &&
+      data.uid == userId &&
+      isValidAccountId(data.accountId) &&
+      data.name is string &&
+      data.name.size() >= 1 &&
+      data.name.size() <= 40 &&
+      data.remark is string &&
+      data.remark.size() <= 40 &&
+      data.avatar is string &&
+      data.avatar.size() <= 500 &&
+      data.signature is string &&
+      data.signature.size() <= 160 &&
+      data.groupName is string &&
+      data.groupName.size() >= 1 &&
+      data.groupName.size() <= 30 &&
+      data.starred is bool &&
+      data.sparkDays is int &&
+      data.sparkDays >= 0 &&
+      data.sparkDays <= 100000 &&
+      data.online is bool &&
+      isValidPlatform(data.platform) &&
+      data.level is int &&
+      data.level >= 1 &&
+      data.level <= 200 &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
+    // 4. Users Collection (Owner-Only PII)
+    match /users/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && isOwner(userId);
+      allow list: if false;
+
+      allow create: if isVerifiedUser()
+        && isValidId(userId)
+        && isOwner(userId)
+        && isValidUser(incoming(), userId)
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && existsAfter(/databases/$(database)/documents/account_ids/$(incoming().accountId))
+        && getAfter(/databases/$(database)/documents/account_ids/$(incoming().accountId)).data.uid == request.auth.uid;
+
+      allow update: if isVerifiedUser()
+        && isValidId(userId)
+        && isOwner(userId)
+        && isValidUser(incoming(), userId)
+        && incoming().uid == existing().uid
+        && incoming().email == existing().email
+        && incoming().emailProvider == existing().emailProvider
+        && incoming().accountId == existing().accountId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'name', 'avatar', 'signature', 'level', 'activeDays', 'updatedAt'
+        ]);
+
+      allow delete: if false;
+
+      // 5. Friends Subcollection (Master Gate + Query Enforcer)
+      match /friends/{friendId} {
+        allow get: if isSignedIn()
+          && isValidId(userId)
+          && isValidId(friendId)
+          && isOwner(userId)
+          && exists(/databases/$(database)/documents/users/$(userId));
+
+        allow list: if isSignedIn()
+          && resource.data.uid == request.auth.uid;
+
+        allow create: if isVerifiedUser()
+          && isValidId(userId)
+          && isValidId(friendId)
+          && isOwner(userId)
+          && isValidFriend(incoming(), userId, friendId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && exists(/databases/$(database)/documents/users/$(userId));
+
+        allow update: if isVerifiedUser()
+          && isValidId(userId)
+          && isValidId(friendId)
+          && isOwner(userId)
+          && isValidFriend(incoming(), userId, friendId)
+          && incoming().friendId == existing().friendId
+          && incoming().uid == existing().uid
+          && incoming().accountId == existing().accountId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && exists(/databases/$(database)/documents/users/$(userId))
+          && (
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'remark', 'groupName', 'starred', 'updatedAt'
+            ]) ||
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'name', 'remark', 'avatar', 'signature', 'groupName',
+              'starred', 'sparkDays', 'online', 'platform', 'level', 'updatedAt'
+            ])
+          );
+
+        allow delete: if isVerifiedUser()
+          && isValidId(userId)
+          && isValidId(friendId)
+          && isOwner(userId)
+          && exists(/databases/$(database)/documents/users/$(userId));
+      }
+    }
+
+    // 6. Zero-PII Exclusive Account ID Directory Index (Single-Doc Lookup Only)
+    match /account_ids/{accountId} {
+      allow get: if isSignedIn() && isValidAccountId(accountId);
+      allow list: if false;
+
+      allow create: if isVerifiedUser()
+        && isValidAccountId(accountId)
+        && isValidAccountIndex(incoming(), accountId)
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && existsAfter(/databases/$(database)/documents/users/$(request.auth.uid))
+        && getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.accountId == accountId;
+
+      allow update: if isVerifiedUser()
+        && isValidAccountId(accountId)
+        && isValidAccountIndex(incoming(), accountId)
+        && existing().uid == request.auth.uid
+        && incoming().uid == existing().uid
+        && incoming().accountId == existing().accountId
+        && incoming().emailProvider == existing().emailProvider
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'name', 'avatar', 'signature', 'level', 'online', 'platform', 'updatedAt'
+        ]);
+
+      allow delete: if false;
+    }
+  }
+}

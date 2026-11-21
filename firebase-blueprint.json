@@ -1,0 +1,284 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Verified StarRipple user profile containing private email binding and immutable 9-digit exclusive accountId.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Firebase Auth UID."
+        },
+        "email": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 160,
+          "description": "Verified Google or Microsoft email address (PII)."
+        },
+        "emailProvider": {
+          "type": "string",
+          "enum": ["google", "microsoft"],
+          "description": "Identity provider category for email verification."
+        },
+        "accountId": {
+          "type": "string",
+          "minLength": 9,
+          "maxLength": 9,
+          "pattern": "^[1-9][0-9]{8}$",
+          "description": "Exclusive 9-digit StarRipple Account ID allocated at registration."
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40,
+          "description": "Display nickname."
+        },
+        "avatar": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Avatar asset key or HTTPS URL."
+        },
+        "signature": {
+          "type": "string",
+          "maxLength": 160,
+          "description": "Personal status signature."
+        },
+        "level": {
+          "type": "integer",
+          "description": "Current growth tier level."
+        },
+        "activeDays": {
+          "type": "integer",
+          "description": "Cumulative active days."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server last-update timestamp."
+        }
+      },
+      "required": [
+        "uid",
+        "email",
+        "emailProvider",
+        "accountId",
+        "name",
+        "avatar",
+        "signature",
+        "level",
+        "activeDays",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "AccountIndex": {
+      "title": "AccountIndex",
+      "description": "Zero-PII directory record keyed by 9-digit exclusive accountId so authenticated users can search and add friends by ID.",
+      "type": "object",
+      "properties": {
+        "accountId": {
+          "type": "string",
+          "minLength": 9,
+          "maxLength": 9,
+          "pattern": "^[1-9][0-9]{8}$",
+          "description": "Exclusive 9-digit StarRipple Account ID."
+        },
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Owner Firebase Auth UID."
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40,
+          "description": "Public display nickname."
+        },
+        "avatar": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Avatar asset key or URL."
+        },
+        "signature": {
+          "type": "string",
+          "maxLength": 160,
+          "description": "Public status signature."
+        },
+        "emailProvider": {
+          "type": "string",
+          "enum": ["google", "microsoft"],
+          "description": "Provider badge without exposing email PII."
+        },
+        "level": {
+          "type": "integer",
+          "description": "Current growth tier level."
+        },
+        "online": {
+          "type": "boolean",
+          "description": "Online presence flag."
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["Windows", "macOS", "iOS", "Android", "iPadOS", "Web"],
+          "description": "Current active platform."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server last-update timestamp."
+        }
+      },
+      "required": [
+        "accountId",
+        "uid",
+        "name",
+        "avatar",
+        "signature",
+        "emailProvider",
+        "level",
+        "online",
+        "platform",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Friend": {
+      "title": "Friend",
+      "description": "Persisted friend entry added by exclusive accountId under a user's private friends subcollection.",
+      "type": "object",
+      "properties": {
+        "friendId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Friend document ID."
+        },
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Owner Firebase Auth UID for strict query enforcement."
+        },
+        "accountId": {
+          "type": "string",
+          "minLength": 9,
+          "maxLength": 9,
+          "pattern": "^[1-9][0-9]{8}$",
+          "description": "Friend's exclusive 9-digit StarRipple Account ID."
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40,
+          "description": "Friend's display nickname."
+        },
+        "remark": {
+          "type": "string",
+          "maxLength": 40,
+          "description": "Optional alias/remark."
+        },
+        "avatar": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Friend avatar key or URL."
+        },
+        "signature": {
+          "type": "string",
+          "maxLength": 160,
+          "description": "Friend signature."
+        },
+        "groupName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 30,
+          "description": "Contact folder group name."
+        },
+        "starred": {
+          "type": "boolean",
+          "description": "Whether friend is marked as special care."
+        },
+        "sparkDays": {
+          "type": "integer",
+          "description": "Interaction streak days."
+        },
+        "online": {
+          "type": "boolean",
+          "description": "Friend online state."
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["Windows", "macOS", "iOS", "Android", "iPadOS", "Web"],
+          "description": "Friend active platform."
+        },
+        "level": {
+          "type": "integer",
+          "description": "Friend growth level."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server last-update timestamp."
+        }
+      },
+      "required": [
+        "friendId",
+        "uid",
+        "accountId",
+        "name",
+        "remark",
+        "avatar",
+        "signature",
+        "groupName",
+        "starred",
+        "sparkDays",
+        "online",
+        "platform",
+        "level",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": {
+        "$ref": "#/entities/User"
+      },
+      "description": "Owner-only user profile document storing verified Google/Microsoft email and immutable exclusive accountId."
+    },
+    "/account_ids/{accountId}": {
+      "schema": {
+        "$ref": "#/entities/AccountIndex"
+      },
+      "description": "Zero-PII lookup index keyed by 9-digit exclusive accountId for single-doc friend lookup without list scraping."
+    },
+    "/users/{userId}/friends/{friendId}": {
+      "schema": {
+        "$ref": "#/entities/Friend"
+      },
+      "description": "Owner-private subcollection storing friends added via exclusive accountId."
+    }
+  }
+}

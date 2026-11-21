@@ -22,10 +22,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node.js 22
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: '22'
           cache: 'npm'
@@ -42,7 +42,7 @@ jobs:
           VITE_SERVER_URL: ${{ github.event.inputs.server_url || vars.STARRIPPLE_SERVER_URL || '' }}
 
       - name: Upload shared Web build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: starripple-web-dist
           path: dist/
@@ -54,16 +54,16 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node.js 22
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: '22'
           cache: 'npm'
 
       - name: Download shared Web build
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: starripple-web-dist
           path: dist
@@ -77,7 +77,7 @@ jobs:
         run: npx electron-builder --win --config electron-builder.json --publish never
 
       - name: Upload Windows installer artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: starripple-windows-installer
           path: release/**/*.exe
@@ -89,16 +89,16 @@ jobs:
     runs-on: macos-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node.js 22
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: '22'
           cache: 'npm'
 
       - name: Download shared Web build
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: starripple-web-dist
           path: dist
@@ -112,7 +112,7 @@ jobs:
         run: npx electron-builder --mac --config electron-builder.json --publish never
 
       - name: Upload macOS installer artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: starripple-macos-installer
           path: |
@@ -126,22 +126,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node.js 22
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: '22'
           cache: 'npm'
 
       - name: Setup Java 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: 'temurin'
           java-version: '21'
 
       - name: Download shared Web build
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: starripple-web-dist
           path: dist
@@ -165,7 +165,7 @@ jobs:
           ./gradlew assembleDebug assembleRelease
 
       - name: Upload Android APK artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: starripple-android-apk
           path: android/app/build/outputs/apk/**/*.apk
@@ -177,16 +177,16 @@ jobs:
     runs-on: macos-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node.js 22
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: '22'
           cache: 'npm'
 
       - name: Download shared Web build
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: starripple-web-dist
           path: dist
@@ -215,7 +215,7 @@ jobs:
           (cd build/ipa && zip -qry ../StarRipple-unsigned.ipa Payload)
 
       - name: Upload iOS artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: starripple-ios-package
           path: |

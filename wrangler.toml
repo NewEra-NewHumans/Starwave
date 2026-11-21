@@ -1,4 +1,18 @@
 name = "starripple-im"
+main = "worker/index.ts"
 compatibility_date = "2025-05-01"
 compatibility_flags = ["nodejs_compat"]
-pages_build_output_dir = "dist"
+
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = ["/api/*", "/ws"]
+
+[[durable_objects.bindings]]
+name = "STARRIPPLE_ROOM"
+class_name = "StarRippleRoom"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["StarRippleRoom"]

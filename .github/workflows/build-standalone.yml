@@ -1,5 +1,8 @@
 name: Build Standalone Cross-Platform Apps
 
+permissions:
+  contents: read
+
 on:
   push:
     branches:

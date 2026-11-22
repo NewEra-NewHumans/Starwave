@@ -217,10 +217,22 @@ service cloud.firestore {
       isValidId(data.ownerUid) &&
       data.memberUids is list &&
       (
-        (data.kind == 'single' && data.memberUids.size() == 2) ||
-        (data.kind == 'group' && data.memberUids.size() >= 1 && data.memberUids.size() <= 50)
+        (
+          data.kind == 'single' &&
+          data.chatId.matches('^dm_[a-zA-Z0-9_\\-]+$') &&
+          data.memberUids.size() == 2 &&
+          data.memberUids[0] is string &&
+          data.memberUids[1] is string &&
+          data.memberUids[0] != data.memberUids[1]
+        ) ||
+        (
+          data.kind == 'group' &&
+          data.chatId.matches('^grp_[a-zA-Z0-9_\\-]+$') &&
+          data.memberUids.size() >= 1 &&
+          data.memberUids.size() <= 50 &&
+          data.memberUids[0] is string
+        )
       ) &&
-      data.memberUids[0] is string &&
       data.lastMessagePreview is string &&
       data.lastMessagePreview.size() <= 200 &&
       data.lastMessageTime is string &&
@@ -475,7 +487,17 @@ service cloud.firestore {
         && request.auth.uid in incoming().memberUids
         && incoming().createdAt == request.time
         && incoming().updatedAt == request.time
-        && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && (
+          (
+            incoming().kind == 'single'
+            && incoming().memberUids[0] < incoming().memberUids[1]
+            && chatId == ('dm_' + incoming().memberUids[0] + '_' + incoming().memberUids[1])
+            && exists(/databases/$(database)/documents/users/$(incoming().memberUids[0])/friends/$('uid-' + incoming().memberUids[1]))
+            && exists(/databases/$(database)/documents/users/$(incoming().memberUids[1])/friends/$('uid-' + incoming().memberUids[0]))
+          ) ||
+          incoming().kind == 'group'
+        );
 
       allow update: if isVerifiedUser()
         && isValidId(chatId)
@@ -496,6 +518,7 @@ service cloud.firestore {
           (
             existing().kind == 'group'
             && existing().ownerUid == request.auth.uid
+            && existing().ownerUid in incoming().memberUids
             && incoming().diff(existing()).affectedKeys().hasOnly([
               'title', 'avatar', 'memberUids', 'updatedAt'
             ])

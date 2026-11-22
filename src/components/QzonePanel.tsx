@@ -37,7 +37,7 @@ import {
   Wand2,
   X,
 } from 'lucide-react';
-import { apiUrl } from '../utils/serverEndpoint';
+import { authedAiPost } from '../utils/aiClient';
 import {
   Contact,
   GuestbookEntry,
@@ -290,13 +290,15 @@ export const QzonePanel: React.FC<QzonePanelProps> = ({
     setAiBusy(true);
     setAiStatusText(action === 'repair' ? '正在执行 AI 画质增强...' : '正在执行 AI 纹理融合...');
     try {
-      const resp = await fetch(apiUrl('/api/ai/photo-enhance'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action, caption: editingPhoto.caption }),
+      const res = await authedAiPost<{ note?: string }>('/api/ai/photo-enhance', {
+        action,
+        caption: editingPhoto.caption,
       });
-      const data = await resp.json();
-      const note = resp.ok ? data.note : data.error || '已完成本地画质优化';
+      const note = res.ok
+        ? res.data.note || '已完成画质增强'
+        : res.authRequired
+        ? '已完成本地画质优化（登录后可使用云端 AI 智能分析）'
+        : res.data.error || '已完成本地画质优化';
       setAiStatusText(note);
       const updated: QzonePhoto = {
         ...editingPhoto,

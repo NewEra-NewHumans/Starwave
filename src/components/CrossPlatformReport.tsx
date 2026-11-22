@@ -673,7 +673,11 @@ export const CrossPlatformReport: React.FC<{
             <button
               type="button"
               onClick={() => {
-                setServerEndpoint(serverInput);
+                const saved = setServerEndpoint(serverInput);
+                if (!saved) {
+                  onShowToast?.('地址无效：仅支持 https:// 或本地 localhost / 127.0.0.1 服务地址');
+                  return;
+                }
                 onShowToast?.('已保存试运行服务器地址，点击「运行跨端实时诊断」可立即验证连通性');
               }}
               className="px-3 py-1.5 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-medium whitespace-nowrap"

@@ -29,17 +29,33 @@ function isPackagedNativeOrigin(): boolean {
   return proto === 'https:' && host === 'localhost';
 }
 
+function isSafeServerOrigin(raw: string): boolean {
+  try {
+    const parsed = new URL(raw.trim());
+    if (parsed.protocol === 'https:') return true;
+    if (
+      parsed.protocol === 'http:' &&
+      (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1')
+    ) {
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 export function getConfiguredServerOrigin(): string {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved && /^https?:\/\//i.test(saved.trim())) {
+    if (saved && isSafeServerOrigin(saved)) {
       return normalizeOrigin(saved);
     }
   } catch {
     // ignore storage errors
   }
   const envUrl = import.meta.env.VITE_SERVER_URL;
-  if (typeof envUrl === 'string' && /^https?:\/\//i.test(envUrl.trim())) {
+  if (typeof envUrl === 'string' && isSafeServerOrigin(envUrl)) {
     return normalizeOrigin(envUrl);
   }
   return '';
@@ -63,16 +79,20 @@ export function getServerEndpoint(): string {
   return DEFAULT_TRIAL_SERVER_URL;
 }
 
-export function setServerEndpoint(url: string): void {
+export function setServerEndpoint(url: string): boolean {
   const cleaned = normalizeOrigin(url);
   try {
     if (!cleaned) {
       localStorage.removeItem(STORAGE_KEY);
-    } else if (/^https?:\/\//i.test(cleaned)) {
-      localStorage.setItem(STORAGE_KEY, cleaned);
+      return true;
     }
+    if (isSafeServerOrigin(cleaned)) {
+      localStorage.setItem(STORAGE_KEY, cleaned);
+      return true;
+    }
+    return false;
   } catch {
-    // ignore storage errors
+    return false;
   }
 }
 

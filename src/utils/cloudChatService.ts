@@ -89,8 +89,16 @@ function normalizeCloudMsgType(t: ChatMessage['type']): CloudSupportedMessageTyp
   return 'text';
 }
 
+function isSafeImageSourceUrl(rawUrl: string): boolean {
+  const trimmed = rawUrl.trim();
+  if (!trimmed) return false;
+  if (/^data:image\/(png|jpeg|jpg|webp|gif);base64,/i.test(trimmed)) return true;
+  if (/^https:\/\//i.test(trimmed)) return true;
+  return false;
+}
+
 async function compressImageDataUrlIfNeeded(rawUrl: string): Promise<string> {
-  if (!rawUrl) return '';
+  if (!rawUrl || !isSafeImageSourceUrl(rawUrl)) return '';
   if (rawUrl.length <= 230000) return rawUrl;
   if (!rawUrl.startsWith('data:image/')) {
     return rawUrl.slice(0, 250000);

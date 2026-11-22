@@ -77,7 +77,7 @@ import {
   Zap,
   Gift,
 } from 'lucide-react';
-import { apiUrl } from '../utils/serverEndpoint';
+import { authedAiPost } from '../utils/aiClient';
 import {
   ActiveCallState,
   AppSection,
@@ -1007,19 +1007,14 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({
         content: m.content,
         timestamp: m.timestamp,
       }));
-      const resp = await fetch(apiUrl('/api/ai/summarize'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          groupTitle: activeConv.title,
-          messages: payloadMsgs,
-        }),
+      const res = await authedAiPost<{ summary?: string }>('/api/ai/summarize', {
+        groupTitle: activeConv.title,
+        messages: payloadMsgs,
       });
-      const data = await resp.json();
-      if (!resp.ok) {
-        setAiSummaryError(data.error || 'AI 群总结服务暂不可用');
+      if (!res.ok) {
+        setAiSummaryError(res.data.error || 'AI 群总结服务暂不可用');
       } else {
-        setAiSummaryText(data.summary);
+        setAiSummaryText(res.data.summary || '');
       }
     } catch {
       setAiSummaryError('网络请求失败，请检查服务运行状态');
@@ -1113,23 +1108,20 @@ export const ChatWorkspace: React.FC<ChatWorkspaceProps> = ({
     setAiReplyLoading(true);
     setAiReplyError('');
     try {
-      const resp = await fetch(apiUrl('/api/ai/smart-reply'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          draft,
-          chatTitle: activeConv.title,
-          recentMessages: rawMessages.slice(-6).map((m) => ({
-            senderName: m.senderName,
-            content: m.content,
-          })),
-        }),
+      const res = await authedAiPost<{
+        suggestions?: Array<{ style: string; text: string }>;
+      }>('/api/ai/smart-reply', {
+        draft,
+        chatTitle: activeConv.title,
+        recentMessages: rawMessages.slice(-6).map((m) => ({
+          senderName: m.senderName,
+          content: m.content,
+        })),
       });
-      const data = await resp.json();
-      if (!resp.ok) {
-        setAiReplyError(data.error || 'AI 建议生成失败');
+      if (!res.ok) {
+        setAiReplyError(res.data.error || 'AI 建议生成失败');
       } else {
-        setAiSuggestions(data.suggestions || []);
+        setAiSuggestions(res.data.suggestions || []);
       }
     } catch {
       setAiReplyError('网络异常，请稍后再试');

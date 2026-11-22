@@ -148,7 +148,8 @@ import {
   subscribeToCloudChats,
   subscribeToFriendRequests,
 } from './utils/cloudChatService';
-import { apiUrl, wsUrl } from './utils/serverEndpoint';
+import { wsUrl } from './utils/serverEndpoint';
+import { authedAiPost } from './utils/aiClient';
 
 const ONLINE_STATUS_OPTIONS: Array<{
   id: OnlineStatusType;
@@ -646,29 +647,58 @@ export default function App() {
     }
   }, [dark, dressUp.themeId]);
 
-  // Connect WebSocket for real-time cross-tab / cross-device sync
+  // Connect authenticated WebSocket for real-time same-account multi-device sync
   useEffect(() => {
+    if (!authUser) {
+      wsRef.current = null;
+      setWsConnected(false);
+      return;
+    }
+
+    let cancelled = false;
     const ws = new WebSocket(wsUrl('/ws'));
     wsRef.current = ws;
 
     ws.onopen = () => {
-      setWsConnected(true);
-      ws.send(
-        JSON.stringify({
-          type: 'device:register',
-          platform: activePlatformView,
-          deviceName: `星涟 ${activePlatformView} 客户端`,
+      void authUser
+        .getIdToken()
+        .then((token) => {
+          if (!cancelled && ws.readyState === WebSocket.OPEN) {
+            ws.send(
+              JSON.stringify({
+                type: 'auth',
+                token,
+                platform: activePlatformView,
+                deviceName: `星涟 ${activePlatformView} 客户端`,
+              })
+            );
+          }
         })
-      );
+        .catch(() => {
+          if (!cancelled) {
+            ws.close();
+          }
+        });
     };
 
-    ws.onclose = () => setWsConnected(false);
+    ws.onclose = () => {
+      if (!cancelled) {
+        setWsConnected(false);
+      }
+    };
 
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        if (data.type === 'chat:message' && data.message) {
+        if (data.type === 'sync:connected') {
+          setWsConnected(true);
+        } else if (data.type === 'sync:auth_error') {
+          setWsConnected(false);
+        } else if (data.type === 'chat:message' && data.message) {
           const incoming = data.message as ChatMessage;
+          if (!incoming || typeof incoming.id !== 'string' || typeof incoming.conversationId !== 'string') {
+            return;
+          }
           setMessagesByConv((prev) => {
             const list = prev[incoming.conversationId] || [];
             if (list.some((m) => m.id === incoming.id)) return prev;
@@ -698,14 +728,14 @@ export default function App() {
               notif.chatSounds.masterVolume
             );
           }
-        } else if (data.type === 'chat:recall') {
+        } else if (data.type === 'chat:recall' && typeof data.conversationId === 'string') {
           setMessagesByConv((prev) => ({
             ...prev,
             [data.conversationId]: (prev[data.conversationId] || []).map((m) =>
               m.id === data.messageId ? { ...m, recalled: true } : m
             ),
           }));
-        } else if (data.type === 'device:kick') {
+        } else if (data.type === 'device:kick' && typeof data.deviceId === 'string') {
           setDevices((prev) => prev.filter((d) => d.id !== data.deviceId));
         }
       } catch {
@@ -714,9 +744,14 @@ export default function App() {
     };
 
     return () => {
+      cancelled = true;
+      setWsConnected(false);
+      if (wsRef.current === ws) {
+        wsRef.current = null;
+      }
       ws.close();
     };
-  }, []);
+  }, [authUser?.uid]);
 
   const broadcastWs = (payload: Record<string, unknown>) => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -914,7 +949,7 @@ export default function App() {
       handleClaimGrowthTask('chat_active', true);
     }
 
-    // If chatting with StarBot or mentioning @星澜/@StarBot, invoke real Gemini proxy
+    // If chatting with StarBot or mentioning @星澜/@StarBot, invoke authenticated Gemini proxy (or demo fallback)
     if (
       partial.type === 'text' &&
       (convId === 'conv-bot' ||
@@ -922,18 +957,19 @@ export default function App() {
         partial.content.includes('@StarBot'))
     ) {
       try {
-        const resp = await fetch(apiUrl('/api/ai/bot-reply'), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
+        let replyText = '';
+        if (!auth.currentUser) {
+          replyText =
+            '「星澜（演示模式）」已收到你的消息！点击右上角登录后，即可解锁真实云端 Gemini AI 智能回复。';
+        } else {
+          const res = await authedAiPost<{ reply?: string }>('/api/ai/bot-reply', {
             prompt: partial.content,
             contextTitle: targetConv?.title,
-          }),
-        });
-        const data = await resp.json();
-        const replyText = resp.ok
-          ? data.reply
-          : data.error || '星澜智能助手暂时无法连接服务，请稍后再试。';
+          });
+          replyText = res.ok
+            ? res.data.reply || '已收到。'
+            : res.data.error || '星澜智能助手暂时无法连接服务，请稍后再试。';
+        }
         const botMsg: ChatMessage = {
           id: `msg-bot-${Date.now()}`,
           conversationId: convId,
@@ -982,6 +1018,10 @@ export default function App() {
   const handleTranslateMessage = async (convId: string, msgId: string) => {
     const target = (messagesByConv[convId] || []).find((m) => m.id === msgId);
     if (!target) return;
+    if (!auth.currentUser) {
+      showToast('请先登录星涟账号后再使用 AI 翻译功能');
+      return;
+    }
     setMessagesByConv((prev) => ({
       ...prev,
       [convId]: (prev[convId] || []).map((m) =>
@@ -990,12 +1030,9 @@ export default function App() {
     }));
 
     try {
-      const resp = await fetch(apiUrl('/api/ai/translate'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: target.content }),
+      const res = await authedAiPost<{ translatedText?: string }>('/api/ai/translate', {
+        text: target.content,
       });
-      const data = await resp.json();
       setMessagesByConv((prev) => ({
         ...prev,
         [convId]: (prev[convId] || []).map((m) =>
@@ -1003,7 +1040,9 @@ export default function App() {
             ? {
                 ...m,
                 translating: false,
-                translatedText: resp.ok ? data.translatedText : data.error || '翻译失败',
+                translatedText: res.ok
+                  ? res.data.translatedText
+                  : res.data.error || '翻译失败',
               }
             : m
         ),

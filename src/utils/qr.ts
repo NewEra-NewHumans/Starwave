@@ -60,6 +60,12 @@ export function playTone(
   playSoundEffect(mapped, volumePercent);
 }
 
+function sanitizeCsvCell(raw: string): string {
+  const text = String(raw ?? '');
+  const formulaSafe = /^[\t\r ]*[=+\-@]/.test(text) ? `'${text}` : text;
+  return `"${formulaSafe.replace(/"/g, '""')}"`;
+}
+
 export function exportSolitaireCsv(
   title: string,
   entries: Array<{ index: number; authorName: string; value: string; time: string }>
@@ -67,9 +73,9 @@ export function exportSolitaireCsv(
   const header = ['序号', '群成员', '接龙内容', '提交时间'];
   const rows = entries.map((e) => [
     String(e.index),
-    `"${e.authorName.replace(/"/g, '""')}"`,
-    `"${e.value.replace(/"/g, '""')}"`,
-    `"${e.time}"`,
+    sanitizeCsvCell(e.authorName),
+    sanitizeCsvCell(e.value),
+    sanitizeCsvCell(e.time),
   ]);
   const csvContent = '\uFEFF' + [header.join(','), ...rows.map((r) => r.join(','))].join('\n');
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });

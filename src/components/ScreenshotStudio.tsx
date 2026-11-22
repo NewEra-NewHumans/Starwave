@@ -35,7 +35,7 @@ import {
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
-import { apiUrl } from '../utils/serverEndpoint';
+import { authedAiPost } from '../utils/aiClient';
 import { ChatMessage } from '../types/qq';
 import { GENERATED_ASSETS } from '../data/seedData';
 
@@ -1182,16 +1182,15 @@ export const ScreenshotStudioModal: React.FC<ScreenshotStudioModalProps> = ({
     setOcrResult(null);
     try {
       const dataUrl = canvas.toDataURL('image/png');
-      const resp = await fetch(apiUrl('/api/ai/screenshot-ocr'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageBase64: dataUrl, mimeType: 'image/png', mode }),
+      const res = await authedAiPost<{ text?: string }>('/api/ai/screenshot-ocr', {
+        imageBase64: dataUrl,
+        mimeType: 'image/png',
+        mode,
       });
-      const data = await resp.json();
-      if (!resp.ok) {
-        setOcrError(data.error || 'AI 识图提取失败');
+      if (!res.ok) {
+        setOcrError(res.data.error || 'AI 识图提取失败');
       } else {
-        setOcrResult(data.text || '未识别到文字内容');
+        setOcrResult(res.data.text || '未识别到文字内容');
       }
     } catch {
       setOcrError('识图请求失败，请检查网络连接');

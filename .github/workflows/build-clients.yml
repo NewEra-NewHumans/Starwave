@@ -1,5 +1,8 @@
 name: Build Cross-Platform Installers
 
+permissions:
+  contents: read
+
 on:
   workflow_dispatch:
     inputs:
